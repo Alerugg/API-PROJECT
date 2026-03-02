@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app import db
-from app.models import Game
+from app.models import Game, Source
 
 SEED_GAMES = [
     {"slug": "pokemon", "name": "Pokémon"},
@@ -20,6 +20,11 @@ def run_seed() -> int:
                 continue
 
             session.add(Game(slug=item["slug"], name=item["name"]))
+            inserted += 1
+
+        fixture_source = session.execute(select(Source).where(Source.name == "fixture_local")).scalar_one_or_none()
+        if not fixture_source:
+            session.add(Source(name="fixture_local", description="Local JSON fixture connector"))
             inserted += 1
 
         session.commit()

@@ -1,8 +1,10 @@
 from flask import Flask
 
 from app.db import init_engine
+from app.routes.catalog import catalog_bp
 from app.routes.games import games_bp
 from app.routes.health import health_bp
+from app.routes.search import search_bp
 
 
 def create_app(database_url: str | None = None) -> Flask:
@@ -10,6 +12,8 @@ def create_app(database_url: str | None = None) -> Flask:
     flask_app = Flask(__name__)
     flask_app.register_blueprint(health_bp)
     flask_app.register_blueprint(games_bp)
+    flask_app.register_blueprint(catalog_bp)
+    flask_app.register_blueprint(search_bp)
     return flask_app
 
 
