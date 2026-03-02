@@ -1,5 +1,4 @@
 from sqlalchemy import func, select
-
 from app import db
 from app.ingest.registry import get_connector
 from app.models import Print, SourceRecord
@@ -27,6 +26,18 @@ def test_games(client):
     assert {"pokemon", "mtg"}.issubset(slugs)
 
 
+def test_search_works(client):
+    connector = get_connector("fixture_local")
+    with db.SessionLocal() as session:
+        connector.run(session, "data/fixtures")
+        session.commit()
+
+    response = client.get("/api/search?q=pika&game=pokemon")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert isinstance(payload, list)
+
+
 def test_search_returns_results_after_seed_or_ingest(client):
     connector = get_connector("fixture_local")
     with db.SessionLocal() as session:
@@ -38,6 +49,12 @@ def test_search_returns_results_after_seed_or_ingest(client):
     payload = response.get_json()
     assert payload
     assert any(item["type"] in {"card", "print"} for item in payload)
+
+
+def test_search_with_empty_type_and_no_results_returns_200(client):
+    response = client.get("/api/search?q=zzzz-no-results&game=pokemon&type=")
+    assert response.status_code == 200
+    assert response.get_json() == []
 
 
 def test_ingest_fixture_local_idempotent(client):

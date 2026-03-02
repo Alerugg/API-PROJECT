@@ -23,6 +23,12 @@
 
 ## D) Ingest: fixture_local
 
+## E) Migraciones y verificación de /api/search
+
+- `docker compose exec backend alembic upgrade head`
+- `curl -i "http://localhost:3000/api/search?q=pika&game=pokemon&type="`
+
+
 Comando:
 
 - `cd backend`
