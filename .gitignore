@@ -39,3 +39,4 @@ __pycache__
 .venv/
 node_modules/
 .next/
+.env
