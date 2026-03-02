@@ -6,30 +6,13 @@
 2) `docker compose up --build`
 3) `docker compose exec backend alembic upgrade head`
 4) `docker compose exec backend python -m app.scripts.seed`
-5) (opcional) `docker compose exec backend python -m app.scripts.seed_catalog`
-6) Ingest inicial con fixtures locales:
+5) (Opcional / recomendado) ingest local:
    - `docker compose exec backend python -m app.ingest.run fixture_local --path backend/data/fixtures`
-7) Ingest real Scryfall (MTG):
-   - `docker compose exec backend python -m app.ingest.run scryfall_mtg --set woe --limit 50`
-8) Ingest Scryfall en modo offline fixture (CI/dev sin internet):
-   - `docker compose exec backend python -m app.ingest.run scryfall_mtg --fixture --path backend/data/fixtures/scryfall --set woe --limit 50`
-
-## B) API versionada
-
-- Endpoints existentes `/api/*` se mantienen por compatibilidad.
-- Endpoints estables nuevos: `/api/v1/*` (read-only), por ejemplo:
-  - `GET /api/v1/health`
-  - `GET /api/v1/search?q=pika&game=pokemon`
-  - `GET /api/v1/games`
-  - `GET /api/v1/sets?game=mtg`
-  - `GET /api/v1/prints?game=mtg&set_code=woe`
-  - `GET /api/v1/prints/{id}`
-
-### Ejemplos curl
-
-- `curl -i http://localhost:3000/api/v1/health`
-- `curl -i "http://localhost:3000/api/v1/search?q=hope&game=mtg"`
-- `curl -i "http://localhost:3000/api/v1/prints?game=mtg&set_code=woe&limit=5"`
+6) Pruebas rápidas:
+   - `curl -i "http://localhost:3000/api/health"`
+   - `curl -i "http://localhost:3000/api/db-check"`
+   - `curl -i "http://localhost:3000/api/games"`
+   - `curl -i "http://localhost:3000/api/search?q=pika&game=pokemon"`
 
 ## C) Rate limit + cache
 
@@ -42,64 +25,88 @@
 
 Comando:
 
-- Docker: `docker compose exec backend python -m app.ingest.run fixture_local --path backend/data/fixtures`
-- No docker: `python -m app.ingest.run fixture_local --path backend/data/fixtures`
+- `cd backend`
+- `python -m venv .venv`
+- `source .venv/bin/activate`
+- `pip install -r requirements.txt`
+- `export DATABASE_URL=postgresql+psycopg2://USER:PASS@localhost:5432/DB`
+- `alembic upgrade head`
+- `python -m app.scripts.seed`
+- `python -m app.ingest.run fixture_local --path backend/data/fixtures`
+- `flask --app app.main:app run --host=0.0.0.0 --port=5000`
 
-## E) Ingest: scryfall_mtg
+Frontend:
 
-- Conector real público (sin scraping): consume Scryfall API.
-- Soporta filtros:
-  - `--set <code>`: ingesta solo un set.
-  - `--limit <n>`: limita cartas por set para pruebas.
-  - `--fixture`: usa JSON locales en `backend/data/fixtures/scryfall` para tests/CI.
-- Dedupe canónico:
-  - Primario por `print_identifiers(source='scryfall', external_id='<card_id>:foil|nonfoil')`.
-  - Secundario por `(game_id, card.name)` para concepto de carta.
-- Trazabilidad:
-  - Guarda `raw_json` y checksum en `source_records`; si existe checksum, se salta.
+- `cd frontend`
+- `npm install`
+- `npm run dev`
 
-## F) Comandos útiles (docker)
+Pruebas:
 
-- Migraciones: `docker compose exec backend alembic upgrade head`
-- Seed base: `docker compose exec backend python -m app.scripts.seed`
-- Seed catálogo demo: `docker compose exec backend python -m app.scripts.seed_catalog`
-- Ingest fixture_local: `docker compose exec backend python -m app.ingest.run fixture_local --path backend/data/fixtures`
-- Ingest scryfall real: `docker compose exec backend python -m app.ingest.run scryfall_mtg --set woe --limit 50`
-- Ingest scryfall fixture: `docker compose exec backend python -m app.ingest.run scryfall_mtg --fixture --path backend/data/fixtures/scryfall --set woe --limit 50`
-- Search v1: `curl -i "http://localhost:3000/api/v1/search?q=hope&game=mtg"`
-- Prints v1: `curl -i "http://localhost:3000/api/v1/prints?game=mtg&set_code=woe"`
+- `curl -i "http://localhost:3000/api/db-check"`
+- `curl -i "http://localhost:3000/api/games"`
+- `curl -i "http://localhost:3000/api/search?q=pika&game=pokemon"`
 
+---
 
-## G) Operations (Dev/Prod)
+## Search API (Postgres FTS)
 
-### Jobs y scheduler
+- Endpoint recomendado: `GET /api/search?q=...&game=...&type=card|set|print&limit=20&offset=0`
+- Validación:
+  - `q` es obligatorio (mínimo 2 chars)
+  - `limit` default 20, máximo 100
+- Resultado:
+  - `type`, `id`, `title`, `subtitle`, `score`
+  - para `print`: `set_code`, `collector_number`, `primary_image_url`
 
-- Variables de entorno:
-  - `ENABLE_SCHEDULER=true|false` (default false)
-  - `SCHEDULER_JOBS="scryfall_mtg:daily,fixture_local:manual"`
-- CLI manual recomendada (cron externo):
-  - `python -m app.jobs.run --job scryfall_mtg --set woe --limit 50`
-  - `python -m app.jobs.run --job fixture_local --path backend/data/fixtures`
-  - `python -m app.jobs.schedule --once`
-- Worker opcional en compose:
-  - `docker compose --profile worker up worker`
+## Ingest framework
 
-### Cron de ejemplo
+CLI base:
 
-```bash
-# cada día 03:00
-0 3 * * * cd /workspace/API-PROJECT/backend && ENABLE_SCHEDULER=true python -m app.jobs.schedule --once
+- `python -m app.ingest.run fixture_local --path backend/data/fixtures`
+
+Qué hace:
+
+1. Lee archivos JSON.
+2. Calcula checksum SHA-256 por archivo.
+3. Guarda payload crudo en `source_records.raw_json`.
+4. Si `(source_id, checksum)` ya existe, hace skip (idempotente).
+5. Normaliza y upsertea `games`, `sets`, `cards`, `prints`, `print_images`, `print_identifiers`.
+
+### fixture_local JSON format
+
+Ejemplo disponible en `backend/data/fixtures/pokemon_demo.json`:
+
+```json
+{
+  "game": {"slug": "pokemon", "name": "Pokémon"},
+  "sets": [{"code": "SV1", "name": "Scarlet & Violet", "release_date": "2023-03-31"}],
+  "cards": [{"name": "Pikachu"}],
+  "prints": [
+    {
+      "set_code": "SV1",
+      "card_name": "Pikachu",
+      "collector_number": "001",
+      "language": "EN",
+      "rarity": "common",
+      "is_foil": false,
+      "images": [{"url": "https://...", "is_primary": true, "source": "fixture_local"}],
+      "identifiers": [{"source": "demo", "external_id": "..."}]
+    }
+  ]
+}
 ```
 
-### Data Quality endpoints (admin)
+Si faltan arrays (`sets`, `cards`, `prints`), no rompe el proceso.
 
-Habilitar con `ADMIN_ENDPOINTS_ENABLED=true`.
+---
 
-- `GET /api/v1/admin/quality/summary`
-- `GET /api/v1/admin/quality/missing-primary-images?limit=100`
-- `GET /api/v1/admin/quality/duplicate-suspects?limit=100`
-- `GET /api/v1/admin/quality/conflicts?limit=100`
+## Estructura
 
-Además, endpoints `/api/v1/*` retornan headers:
-- `X-Ingest-Last-Run`
-- `X-Data-Version`
+- `frontend/` → aplicación Next.js (JavaScript)
+- `backend/app/` → API Flask + SQLAlchemy
+- `backend/app/ingest/` → framework de ingest por conectores
+- `backend/alembic/` → migraciones Alembic
+- `backend/data/fixtures/` → fixtures locales JSON
+- `backend/tests/` → tests pytest
+- `docker-compose.yml` → stack db + backend + frontend

@@ -23,8 +23,9 @@ def run_seed() -> int:
             inserted += 1
 
         fixture_source = session.execute(select(Source).where(Source.name == "fixture_local")).scalar_one_or_none()
-        if fixture_source is None:
+        if not fixture_source:
             session.add(Source(name="fixture_local", description="Local JSON fixture connector"))
+            inserted += 1
 
         session.commit()
 

@@ -1,14 +1,17 @@
-from app.ingest.connectors.fixture_local import FixtureLocalConnector
-from app.ingest.connectors.scryfall_mtg import ScryfallMtgConnector
+from app.ingest.base import SourceConnector
+
+
+class FixtureLocalConnector(SourceConnector):
+    name = "fixture_local"
+
 
 CONNECTORS = {
-    "fixture_local": FixtureLocalConnector,
-    "scryfall_mtg": ScryfallMtgConnector,
+    FixtureLocalConnector.name: FixtureLocalConnector,
 }
 
 
-def get_connector(name: str):
+def get_connector(name: str) -> SourceConnector:
     connector_cls = CONNECTORS.get(name)
-    if connector_cls is None:
-        raise ValueError(f"Unknown connector '{name}'. Available: {', '.join(sorted(CONNECTORS))}")
+    if not connector_cls:
+        raise ValueError(f"Unknown connector: {name}")
     return connector_cls()

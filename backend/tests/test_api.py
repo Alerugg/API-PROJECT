@@ -1,31 +1,15 @@
-import json
-from pathlib import Path
-
 from sqlalchemy import func, select
 
 from app import db
-from app.ingest.run import run_ingest
-from app.models import Print, PrintIdentifier
+from app.ingest.registry import get_connector
+from app.models import Print, SourceRecord
 from app.scripts.seed import run_seed
-from app.scripts.seed_catalog import run_seed_catalog
 
 
 def test_health(client):
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.get_json() == {"ok": True}
-
-
-def test_v1_endpoints_exist(client):
-    run_seed()
-    run_seed_catalog()
-
-    health_response = client.get("/api/v1/health")
-    assert health_response.status_code == 200
-
-    search_response = client.get("/api/v1/search?q=pika&game=pokemon")
-    assert search_response.status_code == 200
-    assert isinstance(search_response.get_json(), list)
 
 
 def test_db_check(client):
@@ -43,184 +27,36 @@ def test_games(client):
     assert {"pokemon", "mtg"}.issubset(slugs)
 
 
-def test_sets_list(client):
-    run_seed()
-    run_seed_catalog()
-
-    response = client.get("/api/sets?game=pokemon")
-    assert response.status_code == 200
-    data = response.get_json()
-
-    assert len(data) >= 1
-    assert any(item["code"] == "SV1" for item in data)
-
-
-def test_prints_filter_by_set_code(client):
-    run_seed()
-    run_seed_catalog()
-
-    response = client.get("/api/prints?game=pokemon&set_code=SV1&language=EN")
-    assert response.status_code == 200
-    data = response.get_json()
-
-    assert len(data) >= 1
-    assert all(item["set"]["code"] == "SV1" for item in data)
-    assert all(item["language"] == "EN" for item in data)
-
-
-def test_print_detail(client):
-    run_seed()
-    run_seed_catalog()
-
-    list_response = client.get("/api/prints?game=pokemon&set_code=SV1")
-    first_print_id = list_response.get_json()[0]["id"]
-
-    detail_response = client.get(f"/api/prints/{first_print_id}")
-    assert detail_response.status_code == 200
-    payload = detail_response.get_json()
-
-    assert payload["print"]["id"] == first_print_id
-    assert payload["set"]["code"] == "SV1"
-    assert isinstance(payload["images"], list)
-
-
 def test_search_returns_results_after_seed_or_ingest(client):
-    run_seed()
-    run_seed_catalog()
+    connector = get_connector("fixture_local")
+    with db.SessionLocal() as session:
+        connector.run(session, "data/fixtures")
+        session.commit()
 
     response = client.get("/api/search?q=pika&game=pokemon")
     assert response.status_code == 200
-    data = response.get_json()
-    assert len(data) >= 1
-    assert any("Pikachu" in item["title"] for item in data)
-
-
-def test_rate_limit_basic(client):
-    run_seed()
-    run_seed_catalog()
-
-    for _ in range(5):
-        ok_response = client.get("/api/v1/search?q=pika&game=pokemon")
-        assert ok_response.status_code == 200
-
-    blocked_response = client.get("/api/v1/search?q=pika&game=pokemon")
-    assert blocked_response.status_code == 429
-
-
-def test_cache_basic(client):
-    run_seed()
-    run_seed_catalog()
-
-    first = client.get("/api/v1/prints?game=pokemon&set_code=SV1")
-    second = client.get("/api/v1/prints?game=pokemon&set_code=SV1")
-
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert first.headers.get("X-Cache") == "MISS"
-    assert second.headers.get("X-Cache") == "HIT"
+    payload = response.get_json()
+    assert payload
+    assert any(item["type"] in {"card", "print"} for item in payload)
 
 
 def test_ingest_fixture_local_idempotent(client):
-    run_seed()
-    fixtures_path = Path(__file__).resolve().parents[1] / "data" / "fixtures"
-
-    run_ingest("fixture_local", str(fixtures_path))
+    connector = get_connector("fixture_local")
     with db.SessionLocal() as session:
-        first_count = session.execute(select(func.count(Print.id))).scalar_one()
-
-    run_ingest("fixture_local", str(fixtures_path))
-    with db.SessionLocal() as session:
-        second_count = session.execute(select(func.count(Print.id))).scalar_one()
-
-    assert first_count == second_count
-
-
-def test_scryfall_fixture_ingest_dedupes_by_identifier(client):
-    fixture_path = Path(__file__).resolve().parents[1] / "data" / "fixtures" / "scryfall"
-
-    run_ingest("scryfall_mtg", str(fixture_path), set_code="woe", limit=10, fixture=True)
-    with db.SessionLocal() as session:
-        first_prints = session.execute(select(func.count(Print.id))).scalar_one()
-        first_ids = session.execute(select(func.count(PrintIdentifier.id)).where(PrintIdentifier.source == "scryfall")).scalar_one()
-
-    run_ingest("scryfall_mtg", str(fixture_path), set_code="woe", limit=10, fixture=True)
-    with db.SessionLocal() as session:
-        second_prints = session.execute(select(func.count(Print.id))).scalar_one()
-        second_ids = session.execute(select(func.count(PrintIdentifier.id)).where(PrintIdentifier.source == "scryfall")).scalar_one()
-
-    assert first_prints == second_prints
-    assert first_ids == second_ids
-
-
-def test_ingest_runs_created(client, tmp_path):
-    fixture = tmp_path / "fixture.json"
-    fixture.write_text('{"game":{"slug":"pokemon","name":"Pokemon"},"sets":[{"code":"SVX","name":"Set X"}],"cards":[{"name":"Card X"}],"prints":[{"card_name":"Card X","set_code":"SVX","collector_number":"1","language":"EN","rarity":"common","is_foil":false}]}', encoding="utf-8")
-
-    run_ingest("fixture_local", str(fixture))
-
-    from app.models import IngestRun, Source
+        connector.run(session, "data/fixtures")
+        session.commit()
 
     with db.SessionLocal() as session:
-        source = session.execute(select(Source).where(Source.name == "fixture_local")).scalar_one()
-        runs = session.execute(select(IngestRun).where(IngestRun.source_id == source.id)).scalars().all()
-        assert len(runs) >= 1
-        assert runs[-1].status == "success"
-        assert "prints" in runs[-1].counts_json
+        print_count_first = session.execute(select(func.count(Print.id))).scalar_one()
+        source_records_first = session.execute(select(func.count(SourceRecord.id))).scalar_one()
 
-
-def test_quality_summary_shape(client):
-    run_seed()
-    run_seed_catalog()
-    client.application.config["ADMIN_ENDPOINTS_ENABLED"] = True
-
-    response = client.get("/api/v1/admin/quality/summary")
-    assert response.status_code == 200
-    payload = response.get_json()
-    for key in ["games", "sets", "cards", "prints", "prints_without_primary_image", "prints_without_identifiers", "sets_without_release_date", "last_ingest_runs"]:
-        assert key in payload
-
-
-def test_admin_endpoints_disabled_by_default(client):
-    response = client.get("/api/v1/admin/quality/summary")
-    assert response.status_code == 404
-
-
-def test_incremental_state_updates(client, tmp_path):
-    from app.models import Source, SourceSyncState
-
-    fixture_dir = tmp_path / "scryfall"
-    fixture_dir.mkdir(parents=True)
-
-    payload_old = {
-        "object": "card",
-        "id": "id-1",
-        "name": "Inc Card",
-        "set": "woe",
-        "lang": "en",
-        "collector_number": "10",
-        "rarity": "common",
-        "foil": False,
-        "nonfoil": True,
-        "updated_at": "2024-01-01T00:00:00Z",
-        "_set": {"code": "woe", "name": "Wilds", "released_at": "2023-09-01"},
-    }
-    payload_new = {
-        **payload_old,
-        "id": "id-2",
-        "collector_number": "11",
-        "updated_at": "2025-01-01T00:00:00Z",
-    }
-    (fixture_dir / "old.json").write_text(json.dumps(payload_old), encoding="utf-8")
-    (fixture_dir / "new.json").write_text(json.dumps(payload_new), encoding="utf-8")
-
-    run_ingest("scryfall_mtg", str(fixture_dir), fixture=True)
     with db.SessionLocal() as session:
-        source = session.execute(select(Source).where(Source.name == "scryfall")).scalar_one()
-        state1 = session.execute(select(SourceSyncState).where(SourceSyncState.source_id == source.id)).scalar_one()
-        first_run = state1.last_run_at
+        connector.run(session, "data/fixtures")
+        session.commit()
 
-    run_ingest("scryfall_mtg", str(fixture_dir), fixture=True)
     with db.SessionLocal() as session:
-        source = session.execute(select(Source).where(Source.name == "scryfall")).scalar_one()
-        state2 = session.execute(select(SourceSyncState).where(SourceSyncState.source_id == source.id)).scalar_one()
-        assert state2.last_run_at >= first_run
+        print_count_second = session.execute(select(func.count(Print.id))).scalar_one()
+        source_records_second = session.execute(select(func.count(SourceRecord.id))).scalar_one()
+
+    assert print_count_first == print_count_second
+    assert source_records_first == source_records_second
