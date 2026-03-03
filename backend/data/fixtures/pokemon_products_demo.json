@@ -1,0 +1,48 @@
+{
+  "game": {"slug": "pokemon", "name": "Pokémon"},
+  "sets": [
+    {"code": "SV1", "name": "Scarlet & Violet", "release_date": "2023-03-31"}
+  ],
+  "products": [
+    {
+      "set_code": "SV1",
+      "product_type": "booster_box",
+      "name": "Scarlet & Violet Booster Box",
+      "release_date": "2023-03-31",
+      "variants": [
+        {
+          "language": "EN",
+          "region": "EU",
+          "packaging": "sealed",
+          "sku": "SV1-BB-EN-EU",
+          "images": [
+            {"url": "https://example.com/sv1_box_en.jpg", "is_primary": true, "source": "fixture_local"}
+          ],
+          "identifiers": [
+            {"source": "demo", "external_id": "sv1-box-en-eu"}
+          ]
+        }
+      ]
+    },
+    {
+      "set_code": "SV1",
+      "product_type": "etb",
+      "name": "Scarlet & Violet Elite Trainer Box",
+      "release_date": "2023-03-31",
+      "variants": [
+        {
+          "language": "EN",
+          "region": "US",
+          "packaging": "sealed",
+          "sku": "SV1-ETB-EN-US",
+          "images": [
+            {"url": "https://example.com/sv1_etb_en.jpg", "is_primary": true, "source": "fixture_local"}
+          ],
+          "identifiers": [
+            {"source": "demo", "external_id": "sv1-etb-en-us"}
+          ]
+        }
+      ]
+    }
+  ]
+}

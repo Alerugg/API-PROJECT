@@ -1,8 +1,5 @@
 from app.ingest.base import SourceConnector
-
-
-class FixtureLocalConnector(SourceConnector):
-    name = "fixture_local"
+from app.ingest.connectors.fixture_local import FixtureLocalConnector
 
 
 CONNECTORS = {

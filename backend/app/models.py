@@ -86,6 +86,52 @@ class PrintIdentifier(Base):
     external_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
 
+class Product(Base):
+    __tablename__ = "products"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"), nullable=False, index=True)
+    set_id: Mapped[int | None] = mapped_column(ForeignKey("sets.id"), nullable=True, index=True)
+    product_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    release_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ProductVariant(Base):
+    __tablename__ = "product_variants"
+    __table_args__ = (UniqueConstraint("product_id", "language", "region", "packaging", name="uq_product_variant_identity"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    language: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    region: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    packaging: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    sku: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ProductImage(Base):
+    __tablename__ = "product_images"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_variant_id: Mapped[int] = mapped_column(ForeignKey("product_variants.id"), nullable=False, index=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ProductIdentifier(Base):
+    __tablename__ = "product_identifiers"
+    __table_args__ = (UniqueConstraint("source", "external_id", name="uq_product_identifier_source_external"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_variant_id: Mapped[int] = mapped_column(ForeignKey("product_variants.id"), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+
+
 class Source(Base):
     __tablename__ = "sources"
 
@@ -151,3 +197,37 @@ class ApiRequestMetric(Base):
     period_ym: Mapped[str] = mapped_column(String(7), nullable=False, index=True)
     api_key_prefix: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
     requested_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SourceSyncState(Base):
+    __tablename__ = "source_sync_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), nullable=False, unique=True, index=True)
+    cursor_json: Mapped[dict] = mapped_column(json_type, nullable=False, default=dict)
+    last_run_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class IngestRun(Base):
+    __tablename__ = "ingest_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), nullable=False, index=True)
+    started_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    counts_json: Mapped[dict] = mapped_column(json_type, nullable=False, default=dict)
+    error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PrintFieldProvenance(Base):
+    __tablename__ = "print_field_provenance"
+    __table_args__ = (UniqueConstraint("print_id", "field_name", "source", name="uq_print_field_provenance"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    print_id: Mapped[int] = mapped_column(ForeignKey("prints.id"), nullable=False, index=True)
+    field_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    value_text: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

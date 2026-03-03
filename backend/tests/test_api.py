@@ -7,7 +7,7 @@ from app.auth import middleware
 from app.auth.create_key import main as create_key_main
 from app.auth.service import disable_key_by_prefix, hash_api_key, rotate_key_by_prefix
 from app.ingest.registry import get_connector
-from app.models import ApiKey, ApiPlan, Print, SourceRecord
+from app.models import ApiKey, ApiPlan, Print, Product, SourceRecord
 from app.scripts.seed import run_seed
 
 
@@ -345,3 +345,58 @@ def test_quota_exceeded_blocks(client):
     assert first.status_code == 200
     assert second.status_code == 429
     assert second.get_json() == {"error": "quota_exceeded"}
+
+
+def test_products_list_200(client):
+    connector = get_connector("fixture_local")
+    with db.SessionLocal() as session:
+        connector.run(session, "data/fixtures/pokemon_products_demo.json")
+        session.commit()
+
+    response = client.get("/api/v1/products?game=pokemon&type=booster_box", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert isinstance(payload.get("items"), list)
+    assert payload["total"] >= 1
+    assert any(item["product_type"] == "booster_box" for item in payload["items"])
+
+
+def test_product_detail_200(client):
+    connector = get_connector("fixture_local")
+    with db.SessionLocal() as session:
+        connector.run(session, "data/fixtures/pokemon_products_demo.json")
+        session.commit()
+
+    with db.SessionLocal() as session:
+        product_id = session.execute(select(Product.id).order_by(Product.id)).scalars().first()
+
+    response = client.get(f"/api/v1/products/{product_id}", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["product"]["id"] == product_id
+    assert payload["variants"]
+    assert payload["images"]
+
+
+def test_ingest_products_idempotent(client):
+    connector = get_connector("fixture_local")
+    path = "data/fixtures/pokemon_products_demo.json"
+
+    with db.SessionLocal() as session:
+        connector.run(session, path)
+        session.commit()
+
+    with db.SessionLocal() as session:
+        products_first = session.execute(select(func.count(Product.id))).scalar_one()
+        source_records_first = session.execute(select(func.count(SourceRecord.id))).scalar_one()
+
+    with db.SessionLocal() as session:
+        connector.run(session, path)
+        session.commit()
+
+    with db.SessionLocal() as session:
+        products_second = session.execute(select(func.count(Product.id))).scalar_one()
+        source_records_second = session.execute(select(func.count(SourceRecord.id))).scalar_one()
+
+    assert products_first == products_second
+    assert source_records_first == source_records_second
