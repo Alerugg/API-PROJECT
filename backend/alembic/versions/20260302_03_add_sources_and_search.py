@@ -18,7 +18,6 @@ down_revision: Union[str, None] = "20260302_02"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-down_revision: Union[str, None] = "20260302_02"
 def upgrade() -> None:
     op.create_table(
         "sources",
