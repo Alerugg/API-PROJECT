@@ -218,6 +218,39 @@ cd backend
 python -m app.scripts.reindex_search
 ```
 
+## CI jobs (Neon)
+
+GitHub Actions se encarga de migraciones e ingest/reindex fuera de Vercel. La API en Vercel solo sirve tráfico.
+
+### Secret requerido
+
+En GitHub: **Settings → Secrets and variables → Actions → New repository secret**
+
+- Name: `DATABASE_URL_UNPOOLED`
+- Value: cadena de conexión directa (unpooled) de Neon con `sslmode=require`
+
+Los workflows usan:
+
+- `DATABASE_URL_UNPOOLED=${{ secrets.DATABASE_URL_UNPOOLED }}`
+- `DATABASE_URL=${{ secrets.DATABASE_URL_UNPOOLED }}` (fallback para comandos que lean `DATABASE_URL`)
+
+### Jobs disponibles
+
+- `Neon Migrations` (`.github/workflows/migrate.yml`)
+  - Trigger: `push` a `main` y `workflow_dispatch`
+  - Ejecuta `alembic upgrade head` en `backend`
+
+- `Neon Ingest and Reindex` (`.github/workflows/ingest.yml`)
+  - Trigger: cron cada 6 horas y `workflow_dispatch`
+  - Ejecuta: `alembic upgrade head` → ingest `fixture_local` → `python -m app.scripts.reindex_search`
+
+### Ejecución manual desde Actions
+
+1. Ir a la pestaña **Actions** del repositorio.
+2. Seleccionar `Neon Migrations` o `Neon Ingest and Reindex`.
+3. Clic en **Run workflow**.
+4. Elegir branch (normalmente `main`) y confirmar.
+
 ### Scryfall MTG
 
 Fixture/offline mode:
