@@ -1,13 +1,28 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.db import get_database_url
 from app.models import Base
 
+
 config = context.config
-config.set_main_option("sqlalchemy.url", get_database_url())
+
+
+def resolve_migration_database_url() -> tuple[str, str]:
+    if os.getenv("DATABASE_URL_UNPOOLED"):
+        return os.environ["DATABASE_URL_UNPOOLED"], "DATABASE_URL_UNPOOLED"
+
+    if os.getenv("DATABASE_URL"):
+        return os.environ["DATABASE_URL"], "DATABASE_URL"
+
+    return "postgresql+psycopg2://localhost:5432/appdb", "default(localhost)"
+
+
+migration_database_url, source_var = resolve_migration_database_url()
+config.set_main_option("sqlalchemy.url", migration_database_url)
+print(f"[alembic] Using {source_var} for database connection")
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
