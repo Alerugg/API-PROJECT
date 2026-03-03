@@ -1,0 +1,52 @@
+name: Neon Ingest and Reindex
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL_UNPOOLED }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+
+      - name: Run fixture ingest
+        run: |
+          if [ -d "data/fixtures" ]; then
+            INGEST_PATH="data/fixtures"
+          elif [ -d "backend/data/fixtures" ]; then
+            INGEST_PATH="backend/data/fixtures"
+          else
+            echo "No fixture directory found. Expected data/fixtures or backend/data/fixtures."
+            echo "Repository tree snapshot for debug:"
+            pwd
+            ls -la
+            echo "backend directory snapshot:"
+            ls -la backend || true
+            exit 1
+          fi
+
+          echo "Using fixture path: ${INGEST_PATH}"
+          python -m app.ingest.run fixture_local --path "${INGEST_PATH}"
+
+      - name: Reindex search
+        run: python -m app.scripts.reindex_search
