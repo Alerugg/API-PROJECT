@@ -14,6 +14,16 @@ from app.models import Card, Game, Print, PrintIdentifier, PrintImage, Set, Sour
 
 
 class TcgdexPokemonConnector(SourceConnector):
+    def _as_str(self, v):
+        """Coerce API values to string safely."""
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            return str(v.get("abbreviation") or v.get("id") or v.get("code") or v.get("name") or "")
+        return str(v)
+
     name = "tcgdex_pokemon"
     base_url = "https://api.tcgdex.net/v2/en"
 
