@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from app import db
 from app.auth.service import hash_api_key
 from app.ingest.registry import get_connector
-from app.models import ApiKey, ApiPlan, Card, IngestRun, SearchDocument, Source, SourceRecord
+from app.models import ApiKey, ApiPlan, Card, IngestRun, Print, SearchDocument, Set, Source, SourceRecord
 
 
 def _auth_headers(key: str = "admin-key", scopes: list[str] | None = None) -> dict[str, str]:
@@ -155,3 +155,30 @@ def test_tcgdex_search_finds_pikachu_after_ingest(client):
     payload = response.get_json()
     assert payload
     assert any("Pikachu" in item["title"] for item in payload)
+
+
+def test_tcgdex_fixture_bootstrap_after_demo_data_inserts_real_tcgdex_ids(client):
+    fixture_connector = get_connector("fixture_local")
+    tcgdex_connector = get_connector("tcgdex_pokemon")
+
+    with db.SessionLocal() as session:
+        fixture_connector.run(session, "data/fixtures/pokemon_demo.json")
+        session.commit()
+
+    with db.SessionLocal() as session:
+        stats = tcgdex_connector.run(
+            session,
+            "data/fixtures/tcgdex_pokemon_sample.json",
+            fixture=True,
+            incremental=True,
+            limit=1,
+        )
+        session.commit()
+
+    with db.SessionLocal() as session:
+        tcgdex_sets = session.execute(select(Set).where(Set.tcgdex_id.is_not(None))).scalars().all()
+        tcgdex_prints = session.execute(select(Print).where(Print.tcgdex_id.is_not(None))).scalars().all()
+
+    assert stats.records_inserted > 0
+    assert len(tcgdex_sets) >= 1
+    assert len(tcgdex_prints) >= 1

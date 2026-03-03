@@ -36,14 +36,41 @@ class TcgdexPokemonConnector(SourceConnector):
         if pokemon_game_id is None:
             return True
 
-        has_pokemon_cards = session.execute(select(func.count(Card.id)).where(Card.game_id == pokemon_game_id)).scalar_one() > 0
-        if not has_pokemon_cards:
+        pokemon_cards = session.execute(select(Card).where(Card.game_id == pokemon_game_id)).scalars().all()
+        if not pokemon_cards:
+            return True
+
+        has_real_tcgdex_data = any((card.tcgdex_id or "").strip() for card in pokemon_cards)
+        if not has_real_tcgdex_data:
             return True
 
         has_source_records = (
             session.execute(select(func.count()).select_from(SourceRecord).where(SourceRecord.source_id == source.id)).scalar_one() > 0
         )
         return not has_source_records
+
+    def should_skip_existing_record(self, existing_record: SourceRecord, **kwargs) -> bool:
+        payload = existing_record.raw_json or {}
+        card_id = (payload.get("id") or "").strip()
+        if not card_id:
+            self.logger.info("ingest tcgdex checksum hit without card id; reason=existing_by_checksum")
+            return True
+
+        session = kwargs.get("session")
+        if session is None:
+            return True
+
+        game = session.execute(select(Game).where(Game.slug == "pokemon")).scalar_one_or_none()
+        if game is None:
+            return False
+
+        already_linked = (
+            session.execute(select(func.count(Card.id)).where(Card.game_id == game.id, Card.tcgdex_id == card_id)).scalar_one() > 0
+        )
+        if already_linked:
+            self.logger.info("ingest skip connector=%s reason=existing_by_id tcgdex_card_id=%s", self.name, card_id)
+            return True
+        return False
 
     def load(self, path: str | Path | None = None, **kwargs) -> list[tuple[Path, dict, str]]:
         fixture = bool(kwargs.get("fixture", False))
@@ -151,15 +178,20 @@ class TcgdexPokemonConnector(SourceConnector):
         set_payload = payload.get("set") or {}
         set_code = (set_payload.get("code") or "").lower()
         set_tcgdex_id = set_payload.get("tcgdex_id")
-        if not set_code:
+        if not set_code and not set_tcgdex_id:
             return {}
 
         release_date = date.fromisoformat(set_payload["released_at"]) if set_payload.get("released_at") else None
         set_row = None
         if set_tcgdex_id:
             set_row = session.execute(select(Set).where(Set.game_id == game.id, Set.tcgdex_id == set_tcgdex_id)).scalar_one_or_none()
-        if set_row is None:
+        if set_row is None and set_code:
             set_row = session.execute(select(Set).where(Set.game_id == game.id, Set.code == set_code)).scalar_one_or_none()
+
+        if set_row is None and set_payload.get("name"):
+            set_row = session.execute(
+                select(Set).where(Set.game_id == game.id, Set.name == set_payload.get("name"))
+            ).scalar_one_or_none()
 
         if set_row is None:
             set_row = Set(
