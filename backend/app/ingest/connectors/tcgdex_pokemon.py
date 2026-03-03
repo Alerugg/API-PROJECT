@@ -117,7 +117,7 @@ class TcgdexPokemonConnector(SourceConnector):
         set_payload = payload.get("set") or {}
         return {
             "set": {
-                "code": (set_payload.get("abbreviation") or set_payload.get("id") or "").lower(),
+                "code": self._as_str(set_payload.get("abbreviation") or set_payload.get("id") or "").lower(),
                 "name": set_payload.get("name") or (set_payload.get("id") or "").upper(),
                 "released_at": set_payload.get("releaseDate"),
                 "tcgdex_id": set_payload.get("id"),
