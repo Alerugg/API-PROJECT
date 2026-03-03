@@ -2,16 +2,17 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-appdb}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-appdb}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    profiles: ["local-db"]
 
   backend:
     build:
@@ -20,16 +21,14 @@ services:
     environment:
       FLASK_APP: app.main:app
       FLASK_ENV: development
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-appdb}}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_UNPOOLED: ${DATABASE_URL_UNPOOLED}
       PUBLIC_API_ENABLED: ${PUBLIC_API_ENABLED:-false}
       PUBLIC_IP_RATE_LIMIT_RPM: ${PUBLIC_IP_RATE_LIMIT_RPM:-30}
     volumes:
       - ./backend:/app
     ports:
       - "5000:5000"
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test:
         [
@@ -47,7 +46,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-appdb}}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_UNPOOLED: ${DATABASE_URL_UNPOOLED}
       ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-false}
       PUBLIC_API_ENABLED: ${PUBLIC_API_ENABLED:-false}
       PUBLIC_IP_RATE_LIMIT_RPM: ${PUBLIC_IP_RATE_LIMIT_RPM:-30}
@@ -56,9 +56,6 @@ services:
       - ./backend:/app
     command: python -m app.jobs.schedule --once
     profiles: ["worker"]
-    depends_on:
-      db:
-        condition: service_healthy
 
   frontend:
     build:

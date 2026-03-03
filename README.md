@@ -1,12 +1,45 @@
 # API PROJECT
 
+## Neon + env vars (sin credenciales hardcodeadas)
+
+Define variables en tu `.env` local (no commitear):
+
+```bash
+# Runtime (pooler de Neon, recomendado para API)
+DATABASE_URL=postgresql+psycopg2://<user>:<password>@<pooled-host>/<db>?sslmode=require
+
+# Migraciones Alembic (endpoint directo / unpooled)
+DATABASE_URL_UNPOOLED=postgresql+psycopg2://<user>:<password>@<unpooled-host>/<db>?sslmode=require
+```
+
+Notas:
+- Runtime usa `DATABASE_URL`.
+- Alembic usa `DATABASE_URL_UNPOOLED` si existe; si no, hace fallback a `DATABASE_URL`.
+- El repositorio y `docker-compose.yml` no incluyen credenciales por defecto.
+
 ## Run with Docker
 
-1. `cp .env.example .env`
-2. `docker compose up --build`
-3. `docker compose exec backend alembic upgrade head`
-4. `docker compose exec backend python -m app.scripts.seed`
-5. Optional ingest: `docker compose exec backend python -m app.ingest.run fixture_local --path backend/data/fixtures`
+1. Crea `.env` con `DATABASE_URL` (y opcional `DATABASE_URL_UNPOOLED`).
+2. Levanta API y frontend: `docker compose up --build`
+3. Ejecuta migraciones: `docker compose exec backend alembic upgrade head`
+4. Seed opcional: `docker compose exec backend python -m app.scripts.seed`
+5. Ingest opcional: `docker compose exec backend python -m app.ingest.run fixture_local --path backend/data/fixtures`
+
+### Base local opcional (Postgres en Docker)
+
+Si no usas Neon, puedes usar la DB local del compose con el perfil `local-db`:
+
+```bash
+# en .env, define estas variables para la DB local
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=appdb
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/appdb
+DATABASE_URL_UNPOOLED=postgresql+psycopg2://postgres:postgres@db:5432/appdb
+
+# levanta también el servicio db
+docker compose --profile local-db up --build
+```
 
 ## API access model (API as Product)
 
@@ -240,3 +273,47 @@ Requires API key with `read:admin`.
 - Scryfall 429/5xx: connector retries with exponential backoff + request throttling.
 - Fixture path errors: verify path is relative to `backend/` or use absolute path.
 - Empty search results: run `python -m app.scripts.reindex_search` and retry `/api/search?q=pika`.
+
+
+## Deploy env vars
+
+### Vercel
+
+En **Project Settings → Environment Variables**, agrega:
+
+- `DATABASE_URL` = Neon pooled URL
+- `DATABASE_URL_UNPOOLED` = Neon direct/unpooled URL (para jobs/migraciones)
+- `PUBLIC_API_ENABLED` y demás variables de API según necesidad
+
+Si ejecutas migraciones en CI/CD, asegúrate de usar `alembic upgrade head` con `DATABASE_URL_UNPOOLED` presente.
+
+### GitHub Codespaces
+
+1. Abre **Codespaces Secrets** y crea `DATABASE_URL` y `DATABASE_URL_UNPOOLED`.
+2. Exporta en la sesión (o usa `.env` local no versionado):
+
+```bash
+export DATABASE_URL="$DATABASE_URL"
+export DATABASE_URL_UNPOOLED="$DATABASE_URL_UNPOOLED"
+```
+
+3. Verifica conexión:
+
+```bash
+cd backend
+python -c "from app.db import init_engine; e=init_engine(); print(e.url.render_as_string(hide_password=True))"
+```
+
+## Migraciones y smoke tests
+
+```bash
+# migraciones (usa DATABASE_URL_UNPOOLED si está definida)
+cd backend
+alembic upgrade head
+
+# smoke: health
+curl -i http://localhost:5000/api/v1/health
+
+# smoke: games (requiere API key)
+curl -i -H "X-API-Key: <key>" http://localhost:5000/api/v1/games
+```
