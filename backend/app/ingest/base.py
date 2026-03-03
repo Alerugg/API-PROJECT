@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import traceback
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ class IngestStats:
 
 class SourceConnector:
     name = "base"
+    logger = logging.getLogger("app.ingest")
 
     def load(self, path: str | Path | None = None, **kwargs) -> list[tuple[Path, dict, str]]:
         if path is None:
@@ -63,6 +65,9 @@ class SourceConnector:
     def default_cursor(self, **kwargs) -> dict:
         return {}
 
+    def should_skip_existing_record(self, existing_record: SourceRecord, **kwargs) -> bool:
+        return True
+
     def should_bootstrap(self, session, source: Source, **kwargs) -> bool:
         return False
 
@@ -90,11 +95,18 @@ class SourceConnector:
                 existing_record = session.execute(
                     select(SourceRecord).where(SourceRecord.source_id == source.id, SourceRecord.checksum == checksum)
                 ).scalar_one_or_none()
-                if existing_record:
+                if existing_record and self.should_skip_existing_record(existing_record, **kwargs):
                     stats.files_skipped += 1
+                    self.logger.info(
+                        "ingest skip connector=%s file=%s reason=existing_by_checksum checksum=%s",
+                        self.name,
+                        file_path,
+                        checksum,
+                    )
                     continue
 
-                session.add(SourceRecord(source_id=source.id, checksum=checksum, raw_json=payload))
+                if existing_record is None:
+                    session.add(SourceRecord(source_id=source.id, checksum=checksum, raw_json=payload))
                 normalized = self.normalize(payload, **kwargs)
                 self.upsert(session, normalized, stats, source_name=source.name, **kwargs)
 
