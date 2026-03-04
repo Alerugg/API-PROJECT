@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
+
 from flask import Blueprint, jsonify, request
 
 from app import db
@@ -7,6 +10,7 @@ from app.scripts.daily_refresh import build_refresh_args, run_daily_refresh
 from app.scripts.ingest_status import get_ingest_status
 
 admin_refresh_bp = Blueprint("admin_refresh", __name__)
+_REFRESH_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="admin-refresh")
 
 
 def _as_int(value, default: int = 200) -> int:
@@ -39,9 +43,21 @@ def admin_refresh():
         incremental=_as_bool(payload.get("incremental"), True),
         sleep_seconds=0,
     )
-    summary = run_daily_refresh(args)
-    status_code = 200 if summary.get("exit_code", 1) == 0 else 500
-    return jsonify(summary), status_code
+    job_id = str(uuid4())
+
+    def _run_refresh_job() -> None:
+        print(f"[admin_refresh] queued job_id={job_id}", flush=True)
+        try:
+            summary = run_daily_refresh(args)
+            print(
+                f"[admin_refresh] completed job_id={job_id} exit_code={summary.get('exit_code', 1)}",
+                flush=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[admin_refresh] failed job_id={job_id} error={exc}", flush=True)
+
+    _REFRESH_EXECUTOR.submit(_run_refresh_job)
+    return jsonify({"queued": True, "job_id": job_id, "status_url": "/api/v1/admin/ingest-status"}), 202
 
 
 @admin_refresh_bp.get("/api/admin/ingest-status")

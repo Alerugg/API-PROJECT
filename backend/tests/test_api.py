@@ -1,4 +1,5 @@
 import os
+import time
 
 from sqlalchemy import func, select
 
@@ -590,15 +591,42 @@ def test_admin_create_api_key_with_token_required(client, monkeypatch):
     assert ok_response.status_code == 201
 
 
-def test_admin_refresh_requires_auth(client):
-    os.environ["PUBLIC_API_ENABLED"] = "false"
+
+
+def test_admin_refresh_returns_accepted_quickly(client, monkeypatch):
+    monkeypatch.setenv("PUBLIC_API_ENABLED", "false")
+
+    def fake_run_daily_refresh(args):
+        time.sleep(1.5)
+        return {"exit_code": 0}
+
+    class DeferredFuture:
+        def result(self):
+            return None
+
+    def fake_submit(fn, *args, **kwargs):
+        return DeferredFuture()
+
+    monkeypatch.setattr("app.routes.admin_refresh.run_daily_refresh", fake_run_daily_refresh)
+    monkeypatch.setattr("app.routes.admin_refresh._REFRESH_EXECUTOR.submit", fake_submit)
+
+    headers = _auth_headers("admin-rf-fast", ["read:catalog", "read:admin"])
+    started = time.perf_counter()
+    response = client.post("/api/admin/refresh", headers=headers, json={"incremental": True})
+    elapsed = time.perf_counter() - started
+
+    assert response.status_code == 202
+    assert elapsed < 1.0
+
+def test_admin_refresh_requires_auth(client, monkeypatch):
+    monkeypatch.setenv("PUBLIC_API_ENABLED", "false")
     response = client.post("/api/admin/refresh", json={})
     assert response.status_code == 401
     assert response.get_json() == {"error": "missing_api_key"}
 
 
 def test_admin_refresh_allows_admin_key(client, monkeypatch):
-    os.environ["PUBLIC_API_ENABLED"] = "false"
+    monkeypatch.setenv("PUBLIC_API_ENABLED", "false")
 
     def fake_run_daily_refresh(args):
         return {
@@ -610,7 +638,16 @@ def test_admin_refresh_allows_admin_key(client, monkeypatch):
             "reindex": {"ok": True},
         }
 
+    class ImmediateFuture:
+        def result(self):
+            return None
+
+    def fake_submit(fn, *args, **kwargs):
+        fn(*args, **kwargs)
+        return ImmediateFuture()
+
     monkeypatch.setattr("app.routes.admin_refresh.run_daily_refresh", fake_run_daily_refresh)
+    monkeypatch.setattr("app.routes.admin_refresh._REFRESH_EXECUTOR.submit", fake_submit)
 
     headers = _auth_headers("admin-rf", ["read:catalog", "read:admin"])
     response = client.post(
@@ -618,6 +655,8 @@ def test_admin_refresh_allows_admin_key(client, monkeypatch):
         headers=headers,
         json={"pokemon_set": "base1", "pokemon_limit": 10, "incremental": True},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
     payload = response.get_json()
-    assert set(payload.keys()) >= {"pokemon", "mtg", "yugioh", "riftbound", "reindex", "exit_code"}
+    assert payload["queued"] is True
+    assert isinstance(payload["job_id"], str) and payload["job_id"]
+    assert payload["status_url"] == "/api/v1/admin/ingest-status"
