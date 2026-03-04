@@ -14,8 +14,10 @@ export default function AdminPage() {
   })
   const [statusLoading, setStatusLoading] = useState(false)
   const [refreshLoading, setRefreshLoading] = useState(false)
+  const [seedLoading, setSeedLoading] = useState(false)
   const [statusPayload, setStatusPayload] = useState(null)
   const [refreshPayload, setRefreshPayload] = useState(null)
+  const [seedPayload, setSeedPayload] = useState(null)
   const [error, setError] = useState('')
 
   const headers = useMemo(() => (apiKey.trim() ? { 'X-API-Key': apiKey.trim() } : {}), [apiKey])
@@ -70,6 +72,28 @@ export default function AdminPage() {
     }
   }
 
+
+  async function runSeed() {
+    setSeedLoading(true)
+    setError('')
+    try {
+      const response = await fetch('/api/admin/seed', {
+        method: 'POST',
+        headers,
+      })
+      const payload = await response.json()
+      if (!response.ok) {
+        throw new Error(payload?.error || `HTTP ${response.status}`)
+      }
+      setSeedPayload(payload)
+      await loadStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSeedLoading(false)
+    }
+  }
+
   function onChange(name, value) {
     setForm((prev) => ({ ...prev, [name]: value }))
   }
@@ -101,6 +125,9 @@ export default function AdminPage() {
           </button>
           <button className="rounded border px-4 py-2" onClick={loadStatus} disabled={statusLoading}>
             {statusLoading ? 'Loading...' : 'Reload status'}
+          </button>
+          <button className="rounded border px-4 py-2" onClick={runSeed} disabled={seedLoading}>
+            {seedLoading ? 'Running...' : 'Run Seed'}
           </button>
         </div>
       </div>
@@ -135,6 +162,13 @@ export default function AdminPage() {
         <section className="rounded border bg-white p-4">
           <h2 className="mb-2 text-xl font-semibold">Refresh result</h2>
           <pre className="overflow-x-auto rounded bg-gray-100 p-3 text-xs">{JSON.stringify(refreshPayload, null, 2)}</pre>
+        </section>
+      ) : null}
+
+      {seedPayload ? (
+        <section className="mt-4 rounded border bg-white p-4">
+          <h2 className="mb-2 text-xl font-semibold">Seed result</h2>
+          <pre className="overflow-x-auto rounded bg-gray-100 p-3 text-xs">{JSON.stringify(seedPayload, null, 2)}</pre>
         </section>
       ) : null}
     </main>

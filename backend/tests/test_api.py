@@ -262,6 +262,16 @@ def test_admin_dev_api_keys_accepts_valid_token(client, monkeypatch):
     payload = response.get_json()
     assert payload["api_key"].startswith("ak_")
 
+
+
+def test_admin_seed_allows_admin_scope(client, monkeypatch):
+    monkeypatch.setenv("PUBLIC_API_ENABLED", "false")
+    response = client.post("/api/admin/seed", headers=_auth_headers("admin-seed", ["read:catalog", "read:admin"]))
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert isinstance(payload["inserted"], int)
+
 def test_metrics_requires_admin_scope(client):
     os.environ["PUBLIC_API_ENABLED"] = "false"
     response = client.get("/api/v1/admin/metrics", headers=_auth_headers("catalog-key", ["read:catalog"]))

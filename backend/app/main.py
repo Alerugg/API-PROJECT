@@ -8,6 +8,7 @@ from app.routes.admin import admin_bp
 from app.routes.admin_ingest import admin_ingest_bp
 from app.routes.admin_ingest_status import admin_ingest_status_bp
 from app.routes.admin_refresh import admin_refresh_bp
+from app.routes.admin_seed import admin_seed_bp
 from app.routes.admin_metrics import admin_metrics_bp
 from app.routes.docs import docs_bp
 from app.routes.games import games_bp
@@ -29,6 +30,7 @@ def create_app(database_url: str | None = None) -> Flask:
     flask_app.register_blueprint(admin_ingest_bp)
     flask_app.register_blueprint(admin_ingest_status_bp)
     flask_app.register_blueprint(admin_refresh_bp)
+    flask_app.register_blueprint(admin_seed_bp)
     flask_app.register_blueprint(prices_bp)
     register_api_product_middleware(flask_app)
 
