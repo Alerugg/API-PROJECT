@@ -20,6 +20,9 @@ export default function Home() {
       <Link href="/console" className="underline">
         API Console
       </Link>
+      <Link href="/explorer" className="underline">
+        API Explorer
+      </Link>
     </main>
   )
 }
