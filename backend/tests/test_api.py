@@ -599,6 +599,52 @@ def test_search_dark_magician_yugioh_after_reindex_returns_card_and_print(client
     assert any(item["type"] == "print" and "LOB-005" in (item.get("subtitle") or "") for item in payload)
 
 
+def test_reindex_populates_yugioh_search_documents_with_searchable_text(client):
+    connector = get_connector("ygoprodeck_yugioh")
+    with db.SessionLocal() as session:
+        connector.run(session, "data/fixtures/ygoprodeck_yugioh_sample.json", fixture=True, incremental=False)
+        session.commit()
+
+    with db.SessionLocal() as session:
+        session.execute(text("DELETE FROM search_documents"))
+        stats = rebuild_search_documents(session)
+        session.commit()
+
+    assert stats["cards"] >= 2
+    assert stats["prints"] >= 2
+
+    with db.SessionLocal() as session:
+        docs = session.execute(
+            text(
+                """
+                SELECT doc_type, title, subtitle, tsv
+                FROM search_documents sd
+                JOIN games g ON g.id = sd.game_id
+                WHERE g.slug = 'yugioh'
+                """
+            )
+        ).mappings().all()
+
+    assert docs
+    assert any(doc["doc_type"] == "card" and doc["title"] == "Dark Magician" for doc in docs)
+    assert any(doc["doc_type"] == "print" and "LOB-005" in (doc.get("subtitle") or "") for doc in docs)
+    assert all((doc.get("tsv") or "").strip() for doc in docs)
+
+
+def test_search_falls_back_when_index_query_returns_empty_without_game_filter(client):
+    connector = get_connector("ygoprodeck_yugioh")
+    with db.SessionLocal() as session:
+        connector.run(session, "data/fixtures/ygoprodeck_yugioh_sample.json", fixture=True, incremental=False)
+        session.execute(text("DELETE FROM search_documents"))
+        session.commit()
+
+    response = client.get("/api/v1/search?q=Dark%20Magician", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload
+    assert any(item["title"] == "Dark Magician" for item in payload)
+
+
 def test_admin_create_api_key_localhost(client):
     response = client.post('/api/admin/api-keys', headers={'Host': 'localhost'})
     assert response.status_code == 201
