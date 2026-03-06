@@ -14,6 +14,10 @@ from app.models import Card, Game, Print, Set
 class YgoProDeckYugiohConnector(SourceConnector):
     name = "ygoprodeck_yugioh"
     base_url = "https://db.ygoprodeck.com/api/v7"
+    default_headers = {
+        "User-Agent": "API-PROJECT/1.0 (+https://github.com/Alerugg/API-PROJECT)",
+        "Accept": "application/json",
+    }
 
     def load(
         self, path: str | Path | None = None, **kwargs
@@ -75,16 +79,42 @@ class YgoProDeckYugiohConnector(SourceConnector):
         return cards
 
     def _request_json(self, url: str, params: dict | None = None):
-        wait_seconds = 0.3
-        for _ in range(6):
-            response = requests.get(url, params=params, timeout=30)
-            if response.status_code in (429, 500, 502, 503, 504):
+        wait_seconds = 1.0
+        last_error: Exception | None = None
+        status_for_retry = {403, 429, 500, 502, 503, 504}
+        for attempt in range(1, 6):
+            try:
+                response = requests.get(
+                    url,
+                    params=params,
+                    headers=self.default_headers,
+                    timeout=45,
+                )
+                if response.status_code in status_for_retry:
+                    body_preview = response.text[:240].replace("\n", " ")
+                    print(
+                        f"[ygoprodeck_yugioh] retryable_status attempt={attempt} status={response.status_code} wait={wait_seconds:.1f}s body={body_preview}",
+                        flush=True,
+                    )
+                    time.sleep(wait_seconds)
+                    wait_seconds *= 2
+                    continue
+                response.raise_for_status()
+                return response.json()
+            except requests.RequestException as exc:
+                last_error = exc
+                if attempt >= 5:
+                    break
+                print(
+                    f"[ygoprodeck_yugioh] request_error attempt={attempt} wait={wait_seconds:.1f}s error={exc}",
+                    flush=True,
+                )
                 time.sleep(wait_seconds)
                 wait_seconds *= 2
-                continue
-            response.raise_for_status()
-            return response.json()
-        raise RuntimeError(f"YGOProDeck request failed after retries: {url}")
+
+        raise RuntimeError(
+            f"YGOProDeck request failed after retries: {url} last_error={last_error}"
+        )
 
     @staticmethod
     def _normalize_language(value: object) -> str:

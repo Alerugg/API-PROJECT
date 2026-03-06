@@ -563,3 +563,52 @@ curl -i -X POST http://localhost:3000/api/admin/dev/api-keys -H "X-Admin-Token: 
 ```
 
 3) Abrir UI en `http://localhost:3000/explorer`, guardar **Admin token**, hacer click en **Generate API Key** y luego ejecutar búsquedas con la nueva key.
+
+
+## Debug Yugioh on Railway
+
+Para depurar por qué Yugioh no aparece en `ingest-status` o `search`, revisa los logs estructurados nuevos de `admin_refresh` y `daily_refresh` durante un refresh.
+
+### Comandos locales
+
+```bash
+docker compose down && docker compose up --build -d
+docker compose exec backend alembic upgrade head
+
+export ADMIN_TOKEN="dev_admin_123"
+ADMIN_KEY_LOCAL="$(curl -sS -X POST http://localhost:5000/api/admin/dev/api-keys \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}' \
+  | python -c "import sys,json; print(json.load(sys.stdin)['api_key'])")"
+
+curl -i -X POST http://localhost:5000/api/admin/refresh \
+  -H "X-API-Key: $ADMIN_KEY_LOCAL" -H "Content-Type: application/json" \
+  --data-binary '{"pokemon_limit":0,"mtg_limit":0,"yugioh_limit":50,"riftbound_limit":0,"incremental":true}'
+
+curl -sS -H "X-API-Key: $ADMIN_KEY_LOCAL" \
+  "http://localhost:5000/api/v1/search?q=Dark%20Magician&game=yugioh" | python -m json.tool | head -n 40
+```
+
+### Comandos Railway
+
+```bash
+BASE_URL="https://lively-consideration-production.up.railway.app"
+ADMIN_TOKEN="dev_admin_123"
+API_KEY="$(curl -sS -X POST "$BASE_URL/api/admin/dev/api-keys" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}' \
+  | python -c "import sys,json; print(json.load(sys.stdin)['api_key'])")"
+
+curl -i -X POST "$BASE_URL/api/admin/refresh" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  --data-binary '{"pokemon_limit":0,"mtg_limit":0,"yugioh_limit":50,"riftbound_limit":0,"incremental":true}'
+
+sleep 5
+curl -sS -H "X-API-Key: $API_KEY" \
+  "$BASE_URL/api/v1/search?q=Dark%20Magician&game=yugioh" | python -m json.tool | head -n 40
+```
+
+Si falla, busca en Railway logs líneas con prefijos:
+- `[admin_refresh] refresh_args=`
+- `[admin_refresh] summary=`
+- `[daily_refresh] connector_start=`
+- `[daily_refresh] connector_error` + traceback
+- `[ygoprodeck_yugioh] retryable_status` / `request_error`

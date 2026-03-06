@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import traceback
 from datetime import datetime, timezone
 
 import requests
@@ -75,6 +76,19 @@ def _run_connector(connector_name: str, path: str | None = None, **kwargs) -> di
         "stats": _empty_stats(),
     }
 
+    connector_kwargs = {
+        "limit": kwargs.get("limit"),
+        "incremental": kwargs.get("incremental"),
+        "fixture": kwargs.get("fixture"),
+        "set": kwargs.get("set"),
+        "path": path,
+    }
+    print(
+        "[daily_refresh] connector_start="
+        + json.dumps({"connector": connector_name, **connector_kwargs}, ensure_ascii=False, sort_keys=True),
+        flush=True,
+    )
+
     connector = get_connector(connector_name)
     with db.SessionLocal() as session:
         try:
@@ -91,6 +105,26 @@ def _run_connector(connector_name: str, path: str | None = None, **kwargs) -> di
         except Exception as exc:  # noqa: BLE001
             session.rollback()
             result["error"] = str(exc)
+            print(
+                f"[daily_refresh] connector_error connector={connector_name} error={exc}",
+                flush=True,
+            )
+            print(traceback.format_exc(), flush=True)
+
+    print(
+        "[daily_refresh] connector_done="
+        + json.dumps(
+            {
+                "connector": connector_name,
+                "ok": result["ok"],
+                "stats": result["stats"],
+                "error": result["error"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        flush=True,
+    )
     return result
 
 
@@ -124,6 +158,10 @@ def run_daily_refresh(args: argparse.Namespace) -> dict:
             _accumulate(summary["pokemon"]["totals"], pokemon_run["stats"])
             if pokemon_run["ok"]:
                 summary["pokemon"]["ok"] = True
+            print(
+                "[daily_refresh] pokemon_run=" + json.dumps(pokemon_run, ensure_ascii=False, sort_keys=True),
+                flush=True,
+            )
             time.sleep(max(args.sleep_seconds, 0))
 
     if args.mtg_limit > 0:
@@ -137,6 +175,7 @@ def run_daily_refresh(args: argparse.Namespace) -> dict:
         summary["mtg"]["run"] = mtg_run
         summary["mtg"]["ok"] = mtg_run["ok"]
         _accumulate(summary["mtg"]["totals"], mtg_run["stats"])
+        print("[daily_refresh] mtg_run=" + json.dumps(mtg_run, ensure_ascii=False, sort_keys=True), flush=True)
 
     if args.yugioh_limit > 0:
         yugioh_run = _run_connector(
@@ -149,6 +188,7 @@ def run_daily_refresh(args: argparse.Namespace) -> dict:
         summary["yugioh"]["run"] = yugioh_run
         summary["yugioh"]["ok"] = yugioh_run["ok"]
         _accumulate(summary["yugioh"]["totals"], yugioh_run["stats"])
+        print("[daily_refresh] yugioh_run=" + json.dumps(yugioh_run, ensure_ascii=False, sort_keys=True), flush=True)
 
     if args.riftbound_limit > 0:
         riftbound_run = _run_connector(
@@ -161,6 +201,7 @@ def run_daily_refresh(args: argparse.Namespace) -> dict:
         summary["riftbound"]["run"] = riftbound_run
         summary["riftbound"]["ok"] = riftbound_run["ok"]
         _accumulate(summary["riftbound"]["totals"], riftbound_run["stats"])
+        print("[daily_refresh] riftbound_run=" + json.dumps(riftbound_run, ensure_ascii=False, sort_keys=True), flush=True)
 
     try:
         with db.SessionLocal() as session:

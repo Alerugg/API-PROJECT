@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
@@ -65,15 +67,30 @@ def admin_refresh():
     job_id = str(uuid4())
 
     def _run_refresh_job() -> None:
-        print(f"[admin_refresh] queued job_id={job_id}", flush=True)
+        print(
+            "[admin_refresh] refresh_args="
+            + json.dumps(
+                {
+                    "job_id": job_id,
+                    "pokemon_limit": args.pokemon_limit,
+                    "mtg_limit": args.mtg_limit,
+                    "yugioh_limit": args.yugioh_limit,
+                    "riftbound_limit": args.riftbound_limit,
+                    "incremental": args.incremental,
+                    "fixture": args.fixture,
+                    "path": args.path,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            flush=True,
+        )
         try:
             summary = run_daily_refresh(args)
-            print(
-                f"[admin_refresh] completed job_id={job_id} exit_code={summary.get('exit_code', 1)}",
-                flush=True,
-            )
+            print("[admin_refresh] summary=" + json.dumps(summary, ensure_ascii=False, sort_keys=True), flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[admin_refresh] failed job_id={job_id} error={exc}", flush=True)
+            print(traceback.format_exc(), flush=True)
 
     _REFRESH_EXECUTOR.submit(_run_refresh_job)
     return jsonify({"queued": True, "job_id": job_id, "status_url": "/api/v1/admin/ingest-status"}), 202
