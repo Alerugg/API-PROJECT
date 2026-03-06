@@ -54,7 +54,13 @@ def search():
                     """
                     WITH query AS (SELECT plainto_tsquery('simple', :q) AS term)
                     SELECT sd.doc_type AS type, sd.object_id AS id, sd.title, sd.subtitle,
-                           ts_rank(to_tsvector('simple', coalesce(sd.tsv, '')), query.term) AS score,
+                           ts_rank(
+                               to_tsvector(
+                                   'simple',
+                                   coalesce(sd.title, '') || ' ' || coalesce(sd.subtitle, '') || ' ' || coalesce(sd.tsv, '')
+                               ),
+                               query.term
+                           ) AS score,
                            s.code AS set_code, p.collector_number, p.variant,
                            (SELECT pi.url FROM print_images pi WHERE pi.print_id = p.id AND pi.is_primary = true ORDER BY pi.id LIMIT 1) AS primary_image_url
                     FROM search_documents sd
@@ -62,7 +68,10 @@ def search():
                     JOIN games g ON g.id = sd.game_id
                     LEFT JOIN prints p ON sd.doc_type = 'print' AND p.id = sd.object_id
                     LEFT JOIN sets s ON p.set_id = s.id
-                    WHERE to_tsvector('simple', coalesce(sd.tsv, '')) @@ query.term
+                    WHERE to_tsvector(
+                            'simple',
+                            coalesce(sd.title, '') || ' ' || coalesce(sd.subtitle, '') || ' ' || coalesce(sd.tsv, '')
+                          ) @@ query.term
                       AND (:game = '' OR g.slug = :game)
                       AND (:type IS NULL OR sd.doc_type = :type)
                     ORDER BY score DESC, sd.title ASC
@@ -94,7 +103,7 @@ def search():
             like = f"%{q.lower()}%"
             rows = _fallback_search_rows(session, like=like, game=game, result_type=result_type, limit=limit, offset=offset)
 
-        if game and not rows:
+        if not rows:
             like = f"%{q.lower()}%"
             rows = _fallback_search_rows(session, like=like, game=game, result_type=result_type, limit=limit, offset=offset)
 

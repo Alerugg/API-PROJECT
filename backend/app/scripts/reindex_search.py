@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import delete, select, text
 
 from app import db
@@ -51,6 +53,7 @@ def rebuild_search_documents(session, card_ids: set[int] | None = None, set_ids:
 
 def _upsert_doc(session, doc_type: str, object_id: int, game_id: int, title: str, subtitle: str | None, doc_text: str | None = None) -> None:
     value = doc_text or " ".join(part for part in [title, subtitle] if part)
+    value = re.sub(r"\s+", " ", value).strip()
     existing = session.execute(
         select(SearchDocument).where(SearchDocument.doc_type == doc_type, SearchDocument.object_id == object_id)
     ).scalar_one_or_none()
