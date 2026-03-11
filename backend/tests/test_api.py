@@ -7,6 +7,7 @@ from app import db
 from app.auth import middleware
 from app.auth.create_key import main as create_key_main
 from app.auth.service import disable_key_by_prefix, hash_api_key, rotate_key_by_prefix
+from app.ingest.base import IngestStats
 from app.ingest.registry import get_connector
 from app.models import ApiKey, ApiPlan, Card, PriceSnapshot, Print, Product, SourceRecord
 from app.scripts.reindex_search import rebuild_search_documents
@@ -998,3 +999,135 @@ def test_admin_reindex_search_runs_and_returns_stats(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json() == {"ok": True, "reindex": {"cards": 1, "sets": 2, "prints": 3}}
+
+
+def _seed_yugioh_search_fixture():
+    run_seed()
+    connector = get_connector("ygoprodeck_yugioh")
+    with db.SessionLocal() as session:
+        payloads = connector.load(path="data/fixtures", fixture=True, limit=120)
+        for _, payload, checksum in payloads:
+            normalized = connector.normalize(payload)
+            connector.upsert(session, normalized, stats=IngestStats())
+        rebuild_search_documents(session)
+        session.commit()
+
+
+def test_search_suggest_dark_prioritizes_dark_magician_over_other_dark_cards(client):
+    _seed_yugioh_search_fixture()
+
+    with db.SessionLocal() as session:
+        yugioh_game_id = session.execute(text("SELECT id FROM games WHERE slug = 'yugioh' LIMIT 1")).scalar_one()
+        set_id = session.execute(text("SELECT id FROM sets WHERE game_id = :game_id ORDER BY id LIMIT 1"), {"game_id": yugioh_game_id}).scalar_one()
+
+        extra_cards = [
+            Card(game_id=yugioh_game_id, name="Dark Advance"),
+            Card(game_id=yugioh_game_id, name="Dark Alligator"),
+            Card(game_id=yugioh_game_id, name="Dark Angel"),
+        ]
+        session.add_all(extra_cards)
+        session.flush()
+        session.add_all(
+            [
+                Print(set_id=set_id, card_id=extra_cards[0].id, collector_number="LOB-106", rarity="Common", variant="default"),
+                Print(set_id=set_id, card_id=extra_cards[1].id, collector_number="LOB-107", rarity="Common", variant="default"),
+                Print(set_id=set_id, card_id=extra_cards[2].id, collector_number="LOB-108", rarity="Common", variant="default"),
+            ]
+        )
+        session.execute(text("DELETE FROM search_documents"))
+        rebuild_search_documents(session)
+        session.commit()
+
+    response = client.get("/api/v1/search/suggest?q=Dark&game=yugioh", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert isinstance(payload, list)
+    assert payload
+
+    def _index_for(title: str) -> int:
+        return next(i for i, item in enumerate(payload) if item.get("title") == title)
+
+    dark_magician_idx = _index_for("Dark Magician")
+    assert dark_magician_idx < _index_for("Dark Angel")
+    assert dark_magician_idx < _index_for("Dark Alligator")
+    assert dark_magician_idx < _index_for("Dark Advance")
+
+
+def test_search_suggest_lob_005_prioritizes_exact_print_first(client):
+    _seed_yugioh_search_fixture()
+
+    response = client.get("/api/v1/search/suggest?q=LOB-005&game=yugioh", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload
+
+    top = payload[0]
+    assert top["type"] == "print"
+    assert top["title"] == "Dark Magician"
+    assert top["collector_number"] == "LOB-005"
+
+
+def test_search_suggest_lob_keeps_lob_005_near_top_and_consistent_code_order(client):
+    _seed_yugioh_search_fixture()
+
+    response = client.get("/api/v1/search/suggest?q=LOB&game=yugioh", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload
+
+    collector_numbers = [item.get("collector_number") for item in payload if item.get("type") == "print" and item.get("collector_number")]
+    assert "LOB-005" in collector_numbers[:5]
+
+    lob005_idx = next(i for i, item in enumerate(payload) if item.get("collector_number") == "LOB-005")
+    exact_set_hits_before = [
+        item
+        for item in payload[:lob005_idx]
+        if (item.get("set_code") or "").lower() == "lob"
+        and item.get("type") == "print"
+        and (item.get("collector_number") or "") != "LOB-005"
+    ]
+    assert not exact_set_hits_before
+
+
+def test_search_suggest_blue_returns_blue_eyes(client):
+    _seed_yugioh_search_fixture()
+
+    response = client.get("/api/v1/search/suggest?q=Blue&game=yugioh", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload
+    assert any(item.get("title") == "Blue-Eyes White Dragon" for item in payload)
+
+
+def test_v1_card_detail_has_primary_image_and_game(client):
+    _seed_yugioh_search_fixture()
+    with db.SessionLocal() as session:
+        card_id = session.execute(
+            select(Card.id).where(Card.name == "Dark Magician").order_by(Card.id.asc())
+        ).scalars().first()
+
+    response = client.get(f"/api/v1/cards/{card_id}", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["game"] == "yugioh"
+    assert "primary_image_url" in payload
+    assert isinstance(payload["prints"], list)
+
+
+def test_v1_print_detail_has_catalog_shape(client):
+    _seed_yugioh_search_fixture()
+    with db.SessionLocal() as session:
+        print_id = session.execute(
+            select(Print.id)
+            .join(Card, Card.id == Print.card_id)
+            .where(Card.name == "Dark Magician")
+            .order_by(Print.id.asc())
+        ).scalars().first()
+
+    response = client.get(f"/api/v1/prints/{print_id}", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["game"] == "yugioh"
+    assert payload["title"] == "Dark Magician"
+    assert payload["card"]["name"] == "Dark Magician"
+    assert "primary_image_url" in payload

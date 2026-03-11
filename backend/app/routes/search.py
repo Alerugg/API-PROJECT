@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
+import re
 
 from app import db
 
@@ -33,6 +34,93 @@ def _fallback_search_rows(session, *, like: str, game: str, result_type: str | N
         fallback,
         {"like": like, "game": game, "type": result_type, "limit": limit, "offset": offset},
     ).mappings().all()
+
+
+def _fallback_suggest_rows(session, *, q: str, game: str, limit: int):
+    term = " ".join(q.lower().split())
+    looks_like_code = 1 if re.search(r"[0-9_-]", term) else 0
+    params = {
+        "q": term,
+        "prefix": f"{term}%",
+        "contains": f"%{term}%",
+        "token_prefix": f"% {term}%",
+        "looks_like_code": looks_like_code,
+        "game": game,
+        "limit": limit,
+    }
+    sql = text(
+        """
+        WITH card_print_counts AS (
+          SELECT p.card_id, CAST(COUNT(*) AS FLOAT) AS print_count
+          FROM prints p
+          GROUP BY p.card_id
+        ),
+        scored AS (
+          SELECT
+            sd.doc_type AS type,
+            sd.object_id AS id,
+            sd.title,
+            COALESCE(sd.subtitle, '') AS subtitle,
+            g.slug AS game,
+            s.code AS set_code,
+            p.collector_number,
+            p.variant,
+            COALESCE(
+              (SELECT pi.url FROM print_images pi WHERE pi.print_id = p.id AND pi.is_primary IS TRUE ORDER BY pi.id LIMIT 1),
+              (SELECT pi2.url FROM print_images pi2 JOIN prints p2 ON p2.id = pi2.print_id WHERE p2.card_id = p.card_id AND pi2.is_primary IS TRUE ORDER BY pi2.id LIMIT 1)
+            ) AS primary_image_url,
+            (
+              CASE WHEN lower(sd.title) = :q THEN 2400.0 ELSE 0.0 END +
+              CASE WHEN lower(sd.title) LIKE :prefix THEN 1600.0 ELSE 0.0 END +
+              CASE WHEN (' ' || lower(sd.title)) LIKE :token_prefix THEN 950.0 ELSE 0.0 END +
+              CASE WHEN lower(sd.title) LIKE :contains THEN 320.0 ELSE 0.0 END +
+              CASE WHEN lower(COALESCE(p.collector_number, '')) = :q THEN 1900.0 ELSE 0.0 END +
+              CASE WHEN lower(COALESCE(s.code, '')) = :q THEN 1700.0 ELSE 0.0 END +
+              CASE WHEN lower(COALESCE(p.collector_number, '')) LIKE :prefix THEN 1100.0 ELSE 0.0 END +
+              CASE WHEN lower(COALESCE(s.code, '')) LIKE :prefix THEN 900.0 ELSE 0.0 END +
+              CASE WHEN :looks_like_code = 0 AND sd.doc_type = 'card' THEN 220.0 ELSE 0.0 END +
+              CASE WHEN :looks_like_code = 0 AND sd.doc_type = 'print' THEN -90.0 ELSE 0.0 END +
+              CASE WHEN :looks_like_code = 1 AND sd.doc_type = 'print' THEN 140.0 ELSE 0.0 END +
+              (CASE WHEN COALESCE(cpc.print_count, 0) > 50 THEN 50 ELSE COALESCE(cpc.print_count, 0) END) * 5.0 +
+              CASE WHEN sd.doc_type = 'card' THEN (220.0 / (sd.object_id + 20.0)) ELSE 0.0 END
+            ) AS score,
+            ROW_NUMBER() OVER (
+              PARTITION BY lower(sd.title)
+              ORDER BY
+                (
+                  CASE WHEN lower(sd.title) = :q THEN 1 ELSE 0 END
+                ) DESC,
+                (
+                  CASE WHEN lower(COALESCE(p.collector_number, '')) = :q THEN 1 ELSE 0 END
+                ) DESC,
+                (
+                  CASE WHEN sd.doc_type = 'card' THEN 1 ELSE 0 END
+                ) DESC,
+                sd.object_id ASC
+            ) AS title_rank
+          FROM search_documents sd
+          JOIN games g ON g.id = sd.game_id
+          LEFT JOIN prints p ON sd.doc_type = 'print' AND p.id = sd.object_id
+          LEFT JOIN card_print_counts cpc ON cpc.card_id = COALESCE(p.card_id, CASE WHEN sd.doc_type = 'card' THEN sd.object_id ELSE NULL END)
+          LEFT JOIN sets s ON (
+            (sd.doc_type = 'print' AND s.id = p.set_id)
+            OR (sd.doc_type = 'set' AND s.id = sd.object_id)
+          )
+          WHERE (
+            lower(sd.title) LIKE :contains
+            OR lower(COALESCE(p.collector_number, '')) LIKE :contains
+            OR lower(COALESCE(s.code, '')) LIKE :contains
+          )
+          AND (:game = '' OR g.slug = :game)
+        )
+        SELECT *
+        FROM scored
+        WHERE title_rank <= 2
+        ORDER BY score DESC, (CASE WHEN type = 'card' THEN 0 WHEN type = 'print' THEN 1 ELSE 2 END), game ASC, title ASC, id ASC
+        LIMIT :limit
+        """
+    )
+    return session.execute(sql, params).mappings().all()
 
 
 @search_bp.get("/api/search")
@@ -123,5 +211,25 @@ def search():
         if not rows:
             like = f"%{q.lower()}%"
             rows = _fallback_search_rows(session, like=like, game=game, result_type=result_type, limit=limit, offset=offset)
+
+    return jsonify([dict(row) for row in rows])
+
+
+@search_bp.get("/api/search/suggest")
+@search_bp.get("/api/v1/search/suggest")
+def suggest():
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify([])
+
+    game = request.args.get("game", "").strip()
+    limit = min(max(request.args.get("limit", default=10, type=int) or 10, 1), 10)
+
+    with db.SessionLocal() as session:
+        try:
+            rows = _fallback_suggest_rows(session, q=q, game=game, limit=limit)
+        except ProgrammingError:
+            session.rollback()
+            rows = _fallback_suggest_rows(session, q=q, game=game, limit=limit)
 
     return jsonify([dict(row) for row in rows])
