@@ -42,10 +42,8 @@ def _as_bool(value, default: bool = True) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-@admin_refresh_bp.post("/api/admin/refresh")
-def admin_refresh():
-    payload = request.get_json(silent=True) or {}
-    args = build_refresh_args(
+def _build_args_from_payload(payload: dict):
+    return build_refresh_args(
         pokemon_set=payload.get("pokemon_set"),
         pokemon_limit=_parse_limit(payload, "pokemon_limit"),
         mtg_limit=_parse_limit(payload, "mtg_limit"),
@@ -54,6 +52,12 @@ def admin_refresh():
         incremental=_as_bool(payload.get("incremental"), True),
         sleep_seconds=0,
     )
+
+
+@admin_refresh_bp.post("/api/admin/refresh")
+def admin_refresh():
+    payload = request.get_json(silent=True) or {}
+    args = _build_args_from_payload(payload)
     job_id = str(uuid4())
 
     def _run_refresh_job() -> None:
@@ -84,6 +88,16 @@ def admin_refresh():
 
     _REFRESH_EXECUTOR.submit(_run_refresh_job)
     return jsonify({"queued": True, "job_id": job_id, "status_url": "/api/v1/admin/ingest-status"}), 202
+
+
+@admin_refresh_bp.post("/api/admin/refresh-sync")
+@admin_refresh_bp.post("/api/v1/admin/refresh-sync")
+def admin_refresh_sync():
+    payload = request.get_json(silent=True) or {}
+    args = _build_args_from_payload(payload)
+    summary = run_daily_refresh(args)
+    status_code = 200 if summary.get("exit_code") == 0 else 500
+    return jsonify(summary), status_code
 
 
 @admin_refresh_bp.get("/api/admin/ingest-status")

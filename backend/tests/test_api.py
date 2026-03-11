@@ -839,6 +839,62 @@ def test_admin_refresh_allows_admin_key(client, monkeypatch):
     assert payload["status_url"] == "/api/v1/admin/ingest-status"
 
 
+
+def test_admin_refresh_sync_calls_run_daily_refresh_and_returns_summary(client, monkeypatch):
+    monkeypatch.setenv("PUBLIC_API_ENABLED", "false")
+
+    captured = {}
+
+    def fake_build_refresh_args(**kwargs):
+        captured.update(kwargs)
+        return "refresh-args"
+
+    def fake_run_daily_refresh(args):
+        assert args == "refresh-args"
+        return {"exit_code": 0, "ok": True, "details": {"pokemon": 10}}
+
+    monkeypatch.setattr("app.routes.admin_refresh.build_refresh_args", fake_build_refresh_args)
+    monkeypatch.setattr("app.routes.admin_refresh.run_daily_refresh", fake_run_daily_refresh)
+
+    headers = _auth_headers("admin-rf-sync-ok", ["read:catalog", "read:admin"])
+    response = client.post(
+        "/api/admin/refresh-sync",
+        headers=headers,
+        json={"pokemon_set": "base1", "pokemon_limit": 10, "incremental": True},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"exit_code": 0, "ok": True, "details": {"pokemon": 10}}
+    assert captured["pokemon_set"] == "base1"
+    assert captured["pokemon_limit"] == 10
+    assert captured["incremental"] is True
+
+
+def test_admin_refresh_sync_returns_500_when_refresh_fails(client, monkeypatch):
+    monkeypatch.setenv("PUBLIC_API_ENABLED", "false")
+
+    monkeypatch.setattr("app.routes.admin_refresh.build_refresh_args", lambda **kwargs: object())
+    monkeypatch.setattr("app.routes.admin_refresh.run_daily_refresh", lambda args: {"exit_code": 1, "error": "boom"})
+
+    headers = _auth_headers("admin-rf-sync-fail", ["read:catalog", "read:admin"])
+    response = client.post("/api/admin/refresh-sync", headers=headers, json={"incremental": True})
+
+    assert response.status_code == 500
+    assert response.get_json() == {"exit_code": 1, "error": "boom"}
+
+
+def test_admin_refresh_sync_v1_alias(client, monkeypatch):
+    monkeypatch.setenv("PUBLIC_API_ENABLED", "false")
+
+    monkeypatch.setattr("app.routes.admin_refresh.build_refresh_args", lambda **kwargs: object())
+    monkeypatch.setattr("app.routes.admin_refresh.run_daily_refresh", lambda args: {"exit_code": 0, "ok": True})
+
+    headers = _auth_headers("admin-rf-sync-v1", ["read:catalog", "read:admin"])
+    response = client.post("/api/v1/admin/refresh-sync", headers=headers, json={"incremental": True})
+
+    assert response.status_code == 200
+    assert response.get_json() == {"exit_code": 0, "ok": True}
+
 def test_admin_search_debug_requires_token_when_configured(client, monkeypatch):
     monkeypatch.setenv("ADMIN_TOKEN", "secret-token")
 
