@@ -1,6 +1,6 @@
 # Frontend (Next.js + React en JavaScript)
 
-Frontend visual para explorar el catálogo TCG consumiendo **exclusivamente la API real** de API-PROJECT.
+Frontend visual tipo **catálogo/marketplace informativo** para explorar el TCG, consumiendo **solo la API real** de API-PROJECT.
 
 ## Endpoints backend usados por el frontend
 
@@ -8,6 +8,7 @@ Frontend visual para explorar el catálogo TCG consumiendo **exclusivamente la A
 - `GET /api/v1/search`
 - `GET /api/v1/cards/:id`
 - `GET /api/v1/prints/:id`
+- `POST /api/admin/dev/api-keys` (botón de generar key para usarla inmediatamente)
 
 ## Variables de entorno
 
@@ -17,7 +18,7 @@ Crea `frontend/.env.local`:
 # URL base de API. Si se deja vacía, usa same-origin /api/* con rewrite de Next.
 NEXT_PUBLIC_API_BASE_URL=http://localhost:5000
 
-# Opcional: clave por defecto. Si no existe, el usuario la puede pegar en UI.
+# Opcional: clave por defecto. Si no existe, el usuario la puede pegar o generar desde UI.
 NEXT_PUBLIC_API_KEY=
 ```
 
@@ -43,10 +44,17 @@ npm run dev
 
 Abrir: `http://localhost:3000/explorer`
 
+## Flujo de key (importante)
+
+1. En `/explorer`, escribe `Admin token`.
+2. Click en **Generar API Key**.
+3. El frontend llama `POST /api/admin/dev/api-keys`.
+4. La `api_key` devuelta se guarda y se aplica automáticamente para todas las búsquedas.
+
 ## Validación manual de búsqueda real
 
 1. Abre `/explorer`.
-2. Guarda una `X-API-Key` válida en la UI.
+2. Genera API key o pega una key válida.
 3. Prueba en buscador:
    - `Dark Magician`
    - `Forest`

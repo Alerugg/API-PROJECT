@@ -16,19 +16,14 @@ function buildUrl(path, params = {}) {
     url.searchParams.set(key, String(value))
   })
 
-  if (!base) {
-    return `${url.pathname}${url.search}`
-  }
-
+  if (!base) return `${url.pathname}${url.search}`
   return `${url.origin}${url.pathname}${url.search}`
 }
 
 function buildHeaders(apiKey, extraHeaders = {}) {
   const headers = { ...extraHeaders }
   const key = (apiKey || DEFAULT_API_KEY || '').trim()
-  if (key) {
-    headers['X-API-Key'] = key
-  }
+  if (key) headers['X-API-Key'] = key
   return headers
 }
 
@@ -55,6 +50,15 @@ export async function apiRequest(path, { params, apiKey, headers, ...options } =
   return payload
 }
 
+export async function generateDevApiKey(adminToken) {
+  return apiRequest('/api/admin/dev/api-keys', {
+    method: 'POST',
+    headers: {
+      'X-Admin-Token': (adminToken || '').trim(),
+    },
+  })
+}
+
 export function getApiRuntimeConfig() {
   return {
     baseUrl: API_BASE_URL || 'same-origin (/api/* via rewrite)',
@@ -68,10 +72,6 @@ export async function fetchGames(apiKey) {
 
 export async function fetchSearch(params, apiKey) {
   return apiRequest('/api/v1/search', { params, apiKey })
-}
-
-export async function fetchSets(params, apiKey) {
-  return apiRequest('/api/v1/sets', { params, apiKey })
 }
 
 export async function fetchCardDetail(cardId, apiKey) {
