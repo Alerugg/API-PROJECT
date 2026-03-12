@@ -193,10 +193,55 @@ class YgoProDeckYugiohConnector(SourceConnector):
         if not yugoprodeck_id:
             return True
 
+        if not self._pick_best_image_url(raw_payload):
+            # If source payload has no image at all, reprocessing will not backfill media.
+            return True
+
         game_id = session.execute(select(Game.id).where(Game.slug == "yugioh")).scalar_one_or_none()
         if game_id is None:
             return False
 
+        card_row = session.execute(
+            select(Card).where(Card.game_id == game_id, Card.yugoprodeck_id == yugoprodeck_id)
+        ).scalar_one_or_none()
+        if card_row is None:
+            return False
+
+        card_sets = raw_payload.get("card_sets") or []
+        if not card_sets:
+            has_any_primary = session.execute(
+                select(PrintImage.id)
+                .join(Print, Print.id == PrintImage.print_id)
+                .where(Print.card_id == card_row.id, PrintImage.is_primary.is_(True))
+                .limit(1)
+            ).scalar_one_or_none()
+            return has_any_primary is not None
+
+        expected_print_ids = [
+            f"{yugoprodeck_id}::{(set_payload.get('set_code') or '').strip()}::{idx+1}"
+            for idx, set_payload in enumerate(card_sets)
+            if (set_payload.get("set_code") or "").strip()
+        ]
+        if not expected_print_ids:
+            has_any_primary = session.execute(
+                select(PrintImage.id)
+                .join(Print, Print.id == PrintImage.print_id)
+                .where(Print.card_id == card_row.id, PrintImage.is_primary.is_(True))
+                .limit(1)
+            ).scalar_one_or_none()
+            return has_any_primary is not None
+
+        primary_count = session.execute(
+            select(Print.yugioh_id)
+            .join(PrintImage, PrintImage.print_id == Print.id)
+            .where(
+                Print.card_id == card_row.id,
+                Print.yugioh_id.in_(expected_print_ids),
+                PrintImage.is_primary.is_(True),
+            )
+        ).scalars().all()
+
+        return len(set(primary_count)) == len(set(expected_print_ids))
         card_id = session.execute(
             select(Card.id).where(Card.game_id == game_id, Card.yugoprodeck_id == yugoprodeck_id)
         ).scalar_one_or_none()

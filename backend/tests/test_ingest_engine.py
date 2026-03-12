@@ -770,6 +770,82 @@ def test_yugioh_incremental_backfills_missing_images_for_existing_card(client):
     assert image_urls == ["https://images.ygoprodeck.com/images/cards/46986414.jpg"]
 
 
+def test_yugioh_incremental_backfills_partial_missing_images_for_blue_eyes(client):
+    connector = get_connector("ygoprodeck_yugioh")
+
+    with db.SessionLocal() as session:
+        connector.run(
+            session,
+            "data/fixtures/ygoprodeck_yugioh_sample.json",
+            fixture=True,
+            incremental=False,
+        )
+        session.commit()
+
+    with db.SessionLocal() as session:
+        blue_eyes_card_id = session.execute(
+            select(Card.id).where(Card.yugoprodeck_id == "89631139")
+        ).scalar_one()
+
+        # Leave one image in place and remove another to emulate historical partial backfill.
+        target_print_id = session.execute(
+            select(Print.id).where(Print.yugioh_id == "89631139::LOB-001::1")
+        ).scalar_one()
+        session.query(PrintImage).filter(PrintImage.print_id == target_print_id).delete(synchronize_session=False)
+
+        # Ensure card still has at least one primary image in another print so skip logic must be granular.
+        other_print_id = session.execute(
+            select(Print.id).where(Print.card_id == blue_eyes_card_id, Print.id != target_print_id).limit(1)
+        ).scalar_one_or_none()
+        if other_print_id is None:
+            session.add(
+                Print(
+                    set_id=session.execute(select(Print.set_id).where(Print.id == target_print_id)).scalar_one(),
+                    card_id=blue_eyes_card_id,
+                    collector_number="LOB-001-ALT",
+                    language="en",
+                    rarity="Ultra Rare",
+                    variant="ultra-rare",
+                    yugioh_id="89631139::LOB-001-ALT::99",
+                )
+            )
+            session.flush()
+            other_print_id = session.execute(
+                select(Print.id).where(Print.yugioh_id == "89631139::LOB-001-ALT::99")
+            ).scalar_one()
+        has_primary = session.execute(
+            select(PrintImage.id).where(PrintImage.print_id == other_print_id, PrintImage.is_primary.is_(True))
+        ).scalar_one_or_none()
+        if has_primary is None:
+            session.add(
+                PrintImage(
+                    print_id=other_print_id,
+                    url="https://images.ygoprodeck.com/images/cards/89631139.jpg",
+                    is_primary=True,
+                    source="ygoprodeck",
+                )
+            )
+        session.commit()
+
+    with db.SessionLocal() as session:
+        connector.run(
+            session,
+            "data/fixtures/ygoprodeck_yugioh_sample.json",
+            fixture=True,
+            incremental=True,
+        )
+        session.commit()
+
+    with db.SessionLocal() as session:
+        restored = session.execute(
+            select(PrintImage.url)
+            .join(Print, Print.id == PrintImage.print_id)
+            .where(Print.yugioh_id == "89631139::LOB-001::1", PrintImage.is_primary.is_(True))
+        ).scalars().all()
+
+    assert restored == ["https://images.ygoprodeck.com/images/cards/89631139.jpg"]
+
+
 def test_yugioh_missing_rarity_defaults_to_unknown_without_integrity_error(
     client, tmp_path
 ):
