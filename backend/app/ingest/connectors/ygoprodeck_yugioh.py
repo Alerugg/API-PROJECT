@@ -733,12 +733,25 @@ class YgoProDeckYugiohConnector(SourceConnector):
                 if ygo_print_id and print_row.yugioh_id != ygo_print_id:
                     print_row.yugioh_id = ygo_print_id
                     changed = True
-                if print_row.rarity != normalized_rarity:
-                    print_row.rarity = normalized_rarity
-                    changed = True
+                existing_rarity = normalize_rarity(print_row.rarity)
+                incoming_rarity_is_specific = normalized_rarity != "unknown"
+                existing_rarity_is_specific = existing_rarity != "unknown"
+                if incoming_rarity_is_specific or not existing_rarity_is_specific:
+                    if print_row.rarity != normalized_rarity:
+                        print_row.rarity = normalized_rarity
+                        changed = True
+
                 if print_row.language != normalized_language:
                     print_row.language = normalized_language
                     changed = True
+
+                existing_variant = normalize_variant(print_row.variant)
+                incoming_variant_is_specific = variant != "default"
+                existing_variant_is_specific = existing_variant != "default"
+                if incoming_variant_is_specific or not existing_variant_is_specific:
+                    if print_row.variant != variant:
+                        print_row.variant = variant
+                        changed = True
                 if print_row.variant != variant:
                     print_row.variant = variant
                     changed = True
