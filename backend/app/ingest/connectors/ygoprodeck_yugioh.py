@@ -242,6 +242,19 @@ class YgoProDeckYugiohConnector(SourceConnector):
         ).scalars().all()
 
         return len(set(primary_count)) == len(set(expected_print_ids))
+        card_id = session.execute(
+            select(Card.id).where(Card.game_id == game_id, Card.yugoprodeck_id == yugoprodeck_id)
+        ).scalar_one_or_none()
+        if card_id is None:
+            return False
+
+        has_primary_image = session.execute(
+            select(PrintImage.id)
+            .join(Print, Print.id == PrintImage.print_id)
+            .where(Print.card_id == card_id, PrintImage.is_primary.is_(True))
+            .limit(1)
+        ).scalar_one_or_none()
+        return has_primary_image is not None
 
     @classmethod
     def _derive_variant(cls, set_payload: dict) -> str:
