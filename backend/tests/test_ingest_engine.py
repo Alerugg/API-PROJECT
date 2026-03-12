@@ -728,6 +728,48 @@ def test_yugioh_fixture_ingest_persists_primary_images(client):
     assert image_rows[0].source == "ygoprodeck"
 
 
+def test_yugioh_incremental_backfills_missing_images_for_existing_card(client):
+    connector = get_connector("ygoprodeck_yugioh")
+
+    with db.SessionLocal() as session:
+        connector.run(
+            session,
+            "data/fixtures/ygoprodeck_yugioh_sample.json",
+            fixture=True,
+            incremental=False,
+        )
+        session.commit()
+
+    with db.SessionLocal() as session:
+        dark_magician_card_id = session.execute(
+            select(Card.id).where(Card.yugoprodeck_id == "46986414")
+        ).scalar_one()
+        session.query(PrintImage).filter(
+            PrintImage.print_id.in_(
+                select(Print.id).where(Print.card_id == dark_magician_card_id)
+            )
+        ).delete(synchronize_session=False)
+        session.commit()
+
+    with db.SessionLocal() as session:
+        connector.run(
+            session,
+            "data/fixtures/ygoprodeck_yugioh_sample.json",
+            fixture=True,
+            incremental=True,
+        )
+        session.commit()
+
+    with db.SessionLocal() as session:
+        image_urls = session.execute(
+            select(PrintImage.url)
+            .join(Print, Print.id == PrintImage.print_id)
+            .where(Print.yugioh_id == "46986414::LOB-005::1", PrintImage.is_primary.is_(True))
+        ).scalars().all()
+
+    assert image_urls == ["https://images.ygoprodeck.com/images/cards/46986414.jpg"]
+
+
 def test_yugioh_missing_rarity_defaults_to_unknown_without_integrity_error(
     client, tmp_path
 ):

@@ -19,7 +19,7 @@ from app.ingest.normalization import (
     normalize_variant,
     trim_or_none,
 )
-from app.models import Card, Game, Print, PrintImage, Set
+from app.models import Card, Game, Print, PrintImage, Set, SourceRecord
 
 
 class YgoProDeckYugiohConnector(SourceConnector):
@@ -181,6 +181,35 @@ class YgoProDeckYugiohConnector(SourceConnector):
         raise RuntimeError(
             f"YGOProDeck request failed after retries: {url} last_error={last_error}"
         )
+
+
+    def should_skip_existing_record(self, existing_record: SourceRecord, **kwargs) -> bool:
+        session = kwargs.get("session")
+        if session is None:
+            return True
+
+        raw_payload = existing_record.raw_json or {}
+        yugoprodeck_id = trim_or_none(raw_payload.get("id"))
+        if not yugoprodeck_id:
+            return True
+
+        game_id = session.execute(select(Game.id).where(Game.slug == "yugioh")).scalar_one_or_none()
+        if game_id is None:
+            return False
+
+        card_id = session.execute(
+            select(Card.id).where(Card.game_id == game_id, Card.yugoprodeck_id == yugoprodeck_id)
+        ).scalar_one_or_none()
+        if card_id is None:
+            return False
+
+        has_primary_image = session.execute(
+            select(PrintImage.id)
+            .join(Print, Print.id == PrintImage.print_id)
+            .where(Print.card_id == card_id, PrintImage.is_primary.is_(True))
+            .limit(1)
+        ).scalar_one_or_none()
+        return has_primary_image is not None
 
     @classmethod
     def _derive_variant(cls, set_payload: dict) -> str:
