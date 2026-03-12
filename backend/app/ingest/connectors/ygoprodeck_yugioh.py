@@ -327,6 +327,7 @@ class YgoProDeckYugiohConnector(SourceConnector):
                 Print.card_id == card_id,
                 Print.language == normalized_language,
                 Print.is_foil.is_(False),
+                Print.rarity == normalized_rarity,
             ).order_by(Print.id.asc())
         ).scalars().all()
         normalized_matches = [
@@ -751,6 +752,9 @@ class YgoProDeckYugiohConnector(SourceConnector):
                     if print_row.variant != variant:
                         print_row.variant = variant
                         changed = True
+                if print_row.variant != variant:
+                    print_row.variant = variant
+                    changed = True
                 if print_key and print_row.print_key != print_key:
                     print_row.print_key = print_key
                     changed = True
