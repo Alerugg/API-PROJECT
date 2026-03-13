@@ -3,7 +3,7 @@ from sqlalchemy import select
 from app import db
 from app.auth.service import hash_api_key
 from app.ingest.registry import get_connector
-from app.models import ApiKey, ApiPlan, Card, Print
+from app.models import ApiKey, ApiPlan, Card, Game, Print, PrintImage
 from app.scripts.seed import run_seed
 
 
@@ -36,6 +36,14 @@ def _seed_fixture_catalog():
     connector = get_connector("fixture_local")
     with db.SessionLocal() as session:
         connector.run(session, "data/fixtures")
+        session.commit()
+
+
+def _seed_fixture_catalog_with_yugioh():
+    _seed_fixture_catalog()
+    yugioh_connector = get_connector("ygoprodeck_yugioh")
+    with db.SessionLocal() as session:
+        yugioh_connector.run(session, "backend/data/fixtures", fixture=True)
         session.commit()
 
 
@@ -85,3 +93,68 @@ def test_v1_sets_without_api_key_returns_401(client):
     run_seed()
     response = client.get("/api/v1/sets?game=pokemon")
     assert response.status_code == 401
+
+
+def test_v1_search_card_result_includes_primary_image_url_for_yugioh_card(client):
+    _seed_fixture_catalog_with_yugioh()
+
+    with db.SessionLocal() as session:
+        card_row = session.execute(
+            select(Card.id)
+            .join(Print, Print.card_id == Card.id)
+            .join(PrintImage, PrintImage.print_id == Print.id)
+            .where(Card.game_id == select(Game.id).where(Game.slug == "yugioh").scalar_subquery())
+            .order_by(Card.id.asc())
+        ).first()
+
+    assert card_row is not None
+    card_id = card_row[0]
+
+    response = client.get(f"/api/v1/cards/{card_id}", headers=_auth_headers())
+    assert response.status_code == 200
+    card_payload = response.get_json()
+    assert card_payload["primary_image_url"] is not None
+
+    card_name = card_payload["name"]
+    search_response = client.get(
+        f"/api/v1/search?q={card_name}&game=yugioh&type=card",
+        headers=_auth_headers(),
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    assert search_payload
+
+    card_result = next((item for item in search_payload if item["type"] == "card" and item["id"] == card_id), None)
+    assert card_result is not None
+    assert card_result["primary_image_url"] is not None
+
+
+
+def test_v1_search_card_primary_image_matches_card_detail(client):
+    _seed_fixture_catalog_with_yugioh()
+
+    with db.SessionLocal() as session:
+        card_id = session.execute(
+            select(Card.id)
+            .join(Print, Print.card_id == Card.id)
+            .join(PrintImage, PrintImage.print_id == Print.id)
+            .where(Card.game_id == select(Game.id).where(Game.slug == "yugioh").scalar_subquery())
+            .order_by(Card.id.asc())
+        ).scalars().first()
+
+    assert card_id is not None
+
+    detail_response = client.get(f"/api/v1/cards/{card_id}", headers=_auth_headers())
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.get_json()
+
+    search_response = client.get(
+        f"/api/v1/search?q={detail_payload['name']}&game=yugioh&type=card",
+        headers=_auth_headers(),
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+
+    card_result = next((item for item in search_payload if item["type"] == "card" and item["id"] == card_id), None)
+    assert card_result is not None
+    assert card_result["primary_image_url"] == detail_payload["primary_image_url"]

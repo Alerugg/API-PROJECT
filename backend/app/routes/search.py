@@ -62,7 +62,15 @@ def _fallback_search_rows(session, *, like: str, game: str, result_type: str | N
         """
         SELECT * FROM (
           SELECT 'card' AS type, c.id, c.name AS title, '' AS subtitle, g.slug AS game,
-                 NULL AS set_code, NULL AS collector_number, NULL AS variant, NULL AS primary_image_url
+                 NULL AS set_code, NULL AS collector_number, NULL AS variant,
+                 (
+                   SELECT pi.url
+                   FROM print_images pi
+                   JOIN prints p ON p.id = pi.print_id
+                   WHERE p.card_id = c.id
+                   ORDER BY pi.is_primary DESC, pi.id ASC
+                   LIMIT 1
+                 ) AS primary_image_url
           FROM cards c JOIN games g ON g.id = c.game_id WHERE lower(c.name) LIKE :like
           UNION ALL
           SELECT 'set', s.id, s.name, s.code, g.slug,
@@ -243,7 +251,17 @@ def search():
                                )
                            ) AS score,
                            s.code AS set_code, p.collector_number, p.variant,
-                           (SELECT pi.url FROM print_images pi WHERE pi.print_id = p.id AND pi.is_primary = true ORDER BY pi.id LIMIT 1) AS primary_image_url
+                           COALESCE(
+                               (SELECT pi.url FROM print_images pi WHERE pi.print_id = p.id AND pi.is_primary = true ORDER BY pi.id LIMIT 1),
+                               (
+                                   SELECT pi2.url
+                                   FROM print_images pi2
+                                   JOIN prints p2 ON p2.id = pi2.print_id
+                                   WHERE p2.card_id = COALESCE(p.card_id, CASE WHEN sd.doc_type = 'card' THEN sd.object_id ELSE NULL END)
+                                   ORDER BY pi2.is_primary DESC, pi2.id ASC
+                                   LIMIT 1
+                               )
+                           ) AS primary_image_url
                     FROM search_documents sd
                     CROSS JOIN query
                     JOIN games g ON g.id = sd.game_id
@@ -293,7 +311,17 @@ def search():
                                1.0
                            ) AS score,
                            s.code AS set_code, p.collector_number, p.variant,
-                           (SELECT pi.url FROM print_images pi WHERE pi.print_id = p.id AND pi.is_primary IS TRUE ORDER BY pi.id LIMIT 1) AS primary_image_url
+                           COALESCE(
+                               (SELECT pi.url FROM print_images pi WHERE pi.print_id = p.id AND pi.is_primary IS TRUE ORDER BY pi.id LIMIT 1),
+                               (
+                                   SELECT pi2.url
+                                   FROM print_images pi2
+                                   JOIN prints p2 ON p2.id = pi2.print_id
+                                   WHERE p2.card_id = COALESCE(p.card_id, CASE WHEN sd.doc_type = 'card' THEN sd.object_id ELSE NULL END)
+                                   ORDER BY pi2.is_primary DESC, pi2.id ASC
+                                   LIMIT 1
+                               )
+                           ) AS primary_image_url
                     FROM search_documents sd
                     JOIN games g ON g.id = sd.game_id
                     LEFT JOIN prints p ON sd.doc_type = 'print' AND p.id = sd.object_id
