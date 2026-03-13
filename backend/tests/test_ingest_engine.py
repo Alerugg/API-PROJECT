@@ -837,6 +837,7 @@ def test_yugioh_incremental_rehydrates_legacy_row_with_ygo_id_and_missing_key_an
 def test_yugioh_incremental_limit_repairs_legacy_print_not_in_processed_subset(client, tmp_path):
     connector = get_connector("ygoprodeck_yugioh")
     fixture_source = _ygo_fixture_source_path()
+    fixture_source = Path("backend/data/fixtures/ygoprodeck_yugioh_sample.json")
     sample_payload = json.loads(fixture_source.read_text(encoding="utf-8"))
     blue_eyes = next(card for card in sample_payload["data"] if card.get("id") == 89631139)
     dark_magician = next(card for card in sample_payload["data"] if card.get("id") == 46986414)
