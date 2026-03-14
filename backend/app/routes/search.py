@@ -76,7 +76,13 @@ def _looks_like_set_prefix_query(raw_query: str) -> bool:
     if "-" in normalized or "_" in normalized:
         return True
 
-    return normalized.isalpha() and len(normalized) <= 5
+    if normalized.isalpha() is False:
+        return False
+
+    # Keep short alpha-only prefixes (e.g. LOB) eligible for set intent, but
+    # avoid broad activation on longer natural-language fragments like
+    # "cha"/"char" that should stay in name-intent mode.
+    return 3 <= len(normalized) <= 3
 
 
 def _short_query_search_rows(
@@ -91,6 +97,7 @@ def _short_query_search_rows(
 ):
     params = {
         "q_norm": q_norm,
+        "q_len": len(q_norm),
         "title_prefix": f"{q_norm}%",
         "contains": f"%{q_norm}%",
         "game": game,
@@ -144,7 +151,15 @@ def _short_query_search_rows(
         ),
         intent AS (
           SELECT CASE
-            WHEN :is_set_intent_query = 1 AND EXISTS (SELECT 1 FROM base WHERE set_code_l LIKE :title_prefix) THEN 1
+            WHEN :is_set_intent_query = 1
+              AND EXISTS (SELECT 1 FROM base WHERE set_code_l LIKE :title_prefix)
+              AND NOT EXISTS (
+                SELECT 1
+                FROM base
+                WHERE type = 'card'
+                  AND title_l LIKE :title_prefix
+              )
+            THEN 1
             ELSE 0
           END AS has_set_prefix_match
         ),
@@ -200,6 +215,36 @@ def _short_query_search_rows(
                 CASE WHEN type = 'set' THEN 0 WHEN type = 'card' THEN 1 ELSE 2 END,
                 id ASC
             ) AS set_code_rank
+            ,ROW_NUMBER() OVER (
+              PARTITION BY
+                CASE
+                  WHEN type = 'set' AND set_code_l LIKE :title_prefix THEN :q_norm
+                  ELSE set_code_l
+                END
+              ORDER BY
+                CASE WHEN type = 'set' THEN 0 ELSE 1 END,
+                CASE WHEN set_code_l = :q_norm THEN 0 ELSE 1 END,
+                length(set_code_l) ASC,
+                id ASC
+            ) AS set_prefix_group_rank,
+            CASE
+              WHEN :game = '' AND type = 'card' AND game = 'pokemon' AND :is_set_intent_query = 0 THEN 0
+              ELSE 1
+            END AS cross_game_name_rank,
+            CASE
+              WHEN title_l LIKE :title_prefix THEN 0
+              WHEN title_l LIKE :contains THEN 1
+              ELSE 2
+            END AS title_match_rank,
+            CASE
+              WHEN title_l LIKE :title_prefix THEN
+                CASE
+                  WHEN length(title_l) = :q_len THEN 0
+                  WHEN substr(title_l, :q_len + 1, 1) IN (' ', ',', '-', ':', ';', '.', '/', '(', ')') THEN 0
+                  ELSE 1
+                END
+              ELSE 2
+            END AS prefix_word_rank
           FROM base
           WHERE (
             title_l LIKE :title_prefix
@@ -218,13 +263,21 @@ def _short_query_search_rows(
             set_code_l = ''
             OR set_code_rank <= CASE WHEN set_code_l LIKE :title_prefix THEN 3 ELSE 6 END
           )
+          AND (
+            (SELECT has_set_prefix_match FROM intent) = 0
+            OR type <> 'set'
+            OR set_prefix_group_rank = 1
+          )
         ORDER BY
           rank_bucket ASC,
+          cross_game_name_rank ASC,
+          title_match_rank ASC,
+          prefix_word_rank ASC,
           type_rank ASC,
           card_print_count DESC,
           CASE WHEN type = 'card' THEN id ELSE 0 END ASC,
-          CASE WHEN title_l LIKE :q_norm || '%' AND (length(title_l) = length(:q_norm) OR substr(title_l, length(:q_norm) + 1, 1) IN (' ', ',', '-', ':', ';', '.', '/', '(', ')')) THEN 0 ELSE 1 END ASC,
           length(title) ASC,
+          CASE WHEN title_l LIKE :q_norm || '%' AND (length(title_l) = length(:q_norm) OR substr(title_l, length(:q_norm) + 1, 1) IN (' ', ',', '-', ':', ';', '.', '/', '(', ')')) THEN 0 ELSE 1 END ASC,
           title ASC,
           id ASC
         LIMIT :limit OFFSET :offset
