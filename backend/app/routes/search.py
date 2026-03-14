@@ -246,8 +246,6 @@ def _short_query_search_rows(
                   WHEN substr(title_l, :q_len + 1, 1) IN (' ', ',', '-', ':', ';', '.', '/', '(', ')') THEN 0
                   WHEN {space_pos_fn}(title_l, ' ') = 0 THEN 0
                   WHEN {space_pos_fn}(title_l, ' ') > 0 AND :q_len >= ({space_pos_fn}(title_l, ' ') - 1) THEN 0
-                  WHEN strpos(title_l, ' ') = 0 THEN 0
-                  WHEN strpos(title_l, ' ') > 0 AND :q_len >= (strpos(title_l, ' ') - 1) THEN 0
                   ELSE 1
                 END
               ELSE 2
