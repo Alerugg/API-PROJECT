@@ -311,6 +311,16 @@ def search():
                                     )
                                 )
                             )
+                    WHERE to_tsvector(
+                            'simple',
+                            coalesce(sd.title, '') || ' ' || coalesce(sd.subtitle, '') || ' ' || coalesce(sd.tsv, '')
+                          ) @@ query.term
+                      AND (
+                            :is_short_query = 0
+                            OR lower(sd.title) LIKE :q_norm || '%'
+                            OR (' ' || lower(sd.title)) LIKE '% ' || :q_norm || '%'
+                            OR lower(coalesce(p.collector_number, '')) LIKE :q_norm || '%'
+                            OR lower(coalesce(s.code, '')) LIKE :q_norm || '%'
                           )
                       AND (:game = '' OR g.slug = :game)
                       AND (:type IS NULL OR sd.doc_type = :type)
