@@ -1834,6 +1834,24 @@ def test_search_short_yugioh_lo_lob_still_supports_name_and_print_code(client):
     )
 
 
+def test_search_short_yugioh_lob_dedupes_set_variants_by_prefix_identity(client):
+    _seed_multigame_search_fixture()
+
+    response = client.get("/api/v1/search?q=lob&game=yugioh", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload
+
+    set_hits = [item for item in payload[:8] if item.get("type") == "set"]
+    normalized_set_identities = {
+        ((item.get("set_code") or item.get("subtitle") or "").strip().lower())
+        for item in set_hits
+    }
+    normalized_set_identities.discard("")
+
+    assert len(normalized_set_identities) <= 1
+
+
 def test_search_prefers_card_base_over_print_when_titles_match(client):
     _seed_multigame_search_fixture()
 
@@ -1865,4 +1883,4 @@ def test_search_short_prefix_char_prioritizes_charizard(client):
     assert payload
 
     top = payload[0]
-    assert (top.get("title") or "").lower().startswith("charizard")
+    assert (top.get("title") or "").lower() == "charizard"

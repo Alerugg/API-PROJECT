@@ -91,6 +91,7 @@ def _short_query_search_rows(
 ):
     params = {
         "q_norm": q_norm,
+        "q_len": len(q_norm),
         "title_prefix": f"{q_norm}%",
         "contains": f"%{q_norm}%",
         "game": game,
@@ -200,6 +201,36 @@ def _short_query_search_rows(
                 CASE WHEN type = 'set' THEN 0 WHEN type = 'card' THEN 1 ELSE 2 END,
                 id ASC
             ) AS set_code_rank
+            ,ROW_NUMBER() OVER (
+              PARTITION BY
+                CASE
+                  WHEN type = 'set' AND set_code_l LIKE :title_prefix THEN :q_norm
+                  ELSE set_code_l
+                END
+              ORDER BY
+                CASE WHEN type = 'set' THEN 0 ELSE 1 END,
+                CASE WHEN set_code_l = :q_norm THEN 0 ELSE 1 END,
+                length(set_code_l) ASC,
+                id ASC
+            ) AS set_prefix_group_rank,
+            CASE
+              WHEN :game = '' AND type = 'card' AND game = 'pokemon' AND :is_set_intent_query = 0 THEN 0
+              ELSE 1
+            END AS cross_game_name_rank,
+            CASE
+              WHEN title_l LIKE :title_prefix THEN 0
+              WHEN title_l LIKE :contains THEN 1
+              ELSE 2
+            END AS title_match_rank,
+            CASE
+              WHEN title_l LIKE :title_prefix THEN
+                CASE
+                  WHEN instr(title_l, ' ') = 0 THEN 0
+                  WHEN instr(title_l, ' ') > 0 AND :q_len >= (instr(title_l, ' ') - 1) THEN 0
+                  ELSE 1
+                END
+              ELSE 2
+            END AS prefix_word_rank
           FROM base
           WHERE (
             title_l LIKE :title_prefix
@@ -218,13 +249,21 @@ def _short_query_search_rows(
             set_code_l = ''
             OR set_code_rank <= CASE WHEN set_code_l LIKE :title_prefix THEN 3 ELSE 6 END
           )
+          AND (
+            (SELECT has_set_prefix_match FROM intent) = 0
+            OR type <> 'set'
+            OR set_prefix_group_rank = 1
+          )
         ORDER BY
           rank_bucket ASC,
+          cross_game_name_rank ASC,
+          title_match_rank ASC,
+          prefix_word_rank ASC,
           type_rank ASC,
           card_print_count DESC,
           CASE WHEN type = 'card' THEN id ELSE 0 END ASC,
-          CASE WHEN title_l LIKE :q_norm || '%' AND (length(title_l) = length(:q_norm) OR substr(title_l, length(:q_norm) + 1, 1) IN (' ', ',', '-', ':', ';', '.', '/', '(', ')')) THEN 0 ELSE 1 END ASC,
           length(title) ASC,
+          CASE WHEN title_l LIKE :q_norm || '%' AND (length(title_l) = length(:q_norm) OR substr(title_l, length(:q_norm) + 1, 1) IN (' ', ',', '-', ':', ';', '.', '/', '(', ')')) THEN 0 ELSE 1 END ASC,
           title ASC,
           id ASC
         LIMIT :limit OFFSET :offset
