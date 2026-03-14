@@ -108,6 +108,7 @@ def _short_query_search_rows(
         "limit": limit,
         "offset": offset,
         "is_set_intent_query": is_set_intent_query,
+        "enable_contains": 1 if len(q_norm) >= 3 else 0,
     }
     sql = text(
         f"""
@@ -193,8 +194,8 @@ def _short_query_search_rows(
               WHEN collector_l LIKE :title_prefix THEN 4
               WHEN set_code_l = :q_norm THEN 5
               WHEN set_code_l LIKE :title_prefix THEN 6
-              WHEN title_l LIKE :contains THEN 7
-              WHEN collector_l LIKE :contains OR set_code_l LIKE :contains THEN 8
+              WHEN :enable_contains = 1 AND title_l LIKE :contains THEN 7
+              WHEN :enable_contains = 1 AND (collector_l LIKE :contains OR set_code_l LIKE :contains) THEN 8
               ELSE 9
             END AS rank_bucket,
             CASE
@@ -249,13 +250,12 @@ def _short_query_search_rows(
             END AS cross_game_name_rank,
             CASE
               WHEN title_l LIKE :title_prefix THEN 0
-              WHEN title_l LIKE :contains THEN 1
+              WHEN :enable_contains = 1 AND title_l LIKE :contains THEN 1
               ELSE 2
             END AS title_match_rank,
             CASE
-              WHEN :q_len = 3
+              WHEN :q_len > 3
                 AND :game <> ''
-              WHEN :q_len <= 3
                 AND title_l LIKE :title_prefix
                 AND length(title_l) > :q_len
               THEN COALESCE(
@@ -285,9 +285,9 @@ def _short_query_search_rows(
             title_l LIKE :title_prefix
             OR collector_l LIKE :title_prefix
             OR set_code_l LIKE :title_prefix
-            OR title_l LIKE :contains
-            OR collector_l LIKE :contains
-            OR set_code_l LIKE :contains
+            OR (:enable_contains = 1 AND title_l LIKE :contains)
+            OR (:enable_contains = 1 AND collector_l LIKE :contains)
+            OR (:enable_contains = 1 AND set_code_l LIKE :contains)
           )
         )
         SELECT type, id, title, subtitle, game, set_code, collector_number, variant, primary_image_url
