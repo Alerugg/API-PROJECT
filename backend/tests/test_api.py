@@ -1696,6 +1696,18 @@ def test_connectors_keep_primary_images_for_mtg_pokemon_and_riftbound(client):
         assert print_payload["image_url"]
 
 
+def test_search_returns_riftbound_results_after_fixture_ingest(client):
+    connector = get_connector("riftbound")
+    with db.SessionLocal() as session:
+        connector.run(session, "data/fixtures/riftbound_sample.json", fixture=True, incremental=False)
+        session.commit()
+
+    response = client.get("/api/v1/search?q=Shardbreaker&game=riftbound", headers=_auth_headers())
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload
+    assert any("Shardbreaker Titan" in item["title"] for item in payload)
+
 def test_v1_card_detail_uses_primary_image_from_ingested_prints(client):
     connector = get_connector("riftbound")
     with db.SessionLocal() as session:

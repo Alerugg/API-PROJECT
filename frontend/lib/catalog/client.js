@@ -38,6 +38,7 @@ export function fetchPrintById(id) {
 
 export const GAME_OPTIONS = [
   { value: '', label: 'Todos los juegos' },
+  { value: 'riftbound', label: 'Riftbound' },
   { value: 'yugioh', label: 'Yu-Gi-Oh!' },
   { value: 'pokemon', label: 'Pokémon' },
   { value: 'mtg', label: 'Magic: The Gathering' },
