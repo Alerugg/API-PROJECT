@@ -97,6 +97,7 @@ def _short_query_search_rows(
     offset: int,
     is_set_intent_query: int,
 ):
+    space_pos_fn = "strpos" if session.bind.dialect.name == "postgresql" else "instr"
     params = {
         "q_norm": q_norm,
         "q_len": len(q_norm),
@@ -109,7 +110,7 @@ def _short_query_search_rows(
         "is_set_intent_query": is_set_intent_query,
     }
     sql = text(
-        """
+        f"""
         WITH card_print_counts AS (
           SELECT p.card_id, CAST(COUNT(*) AS FLOAT) AS print_count
           FROM prints p
@@ -243,6 +244,8 @@ def _short_query_search_rows(
                 CASE
                   WHEN length(title_l) = :q_len THEN 0
                   WHEN substr(title_l, :q_len + 1, 1) IN (' ', ',', '-', ':', ';', '.', '/', '(', ')') THEN 0
+                  WHEN {space_pos_fn}(title_l, ' ') = 0 THEN 0
+                  WHEN {space_pos_fn}(title_l, ' ') > 0 AND :q_len >= ({space_pos_fn}(title_l, ' ') - 1) THEN 0
                   WHEN strpos(title_l, ' ') = 0 THEN 0
                   WHEN strpos(title_l, ' ') > 0 AND :q_len >= (strpos(title_l, ' ') - 1) THEN 0
                   ELSE 1
