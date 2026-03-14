@@ -30,6 +30,18 @@ test('catalog client consumes internal BFF routes', async () => {
 test('BFF routes read internal server-side env vars', async () => {
   const internalApi = await fs.readFile(new URL('../lib/catalog/internalApi.js', import.meta.url), 'utf8')
 
+test('catalog client consumes internal BFF routes', async () => {
+  const apiClient = await fs.readFile(new URL('../lib/catalog/client.js', import.meta.url), 'utf8')
+
+  assert.match(apiClient, /\/api\/catalog\/search/)
+  assert.match(apiClient, /\/api\/catalog\/cards\//)
+  assert.match(apiClient, /\/api\/catalog\/prints\//)
+  assert.doesNotMatch(apiClient, /NEXT_PUBLIC_API_KEY/)
+})
+
+test('BFF routes read internal server-side env vars', async () => {
+  const internalApi = await fs.readFile(new URL('../lib/catalog/internalApi.js', import.meta.url), 'utf8')
+
   assert.match(internalApi, /INTERNAL_API_BASE_URL/)
   assert.match(internalApi, /INTERNAL_API_KEY/)
 })
