@@ -71,6 +71,26 @@ Abrir `http://localhost:3000`.
 - Permite probar presets de `search/cards/prints` contra el BFF interno.
 - No aparece en la navegación pública del catálogo.
 
+### Puertos de desarrollo
+
+- Frontend Next.js: `3000`
+- Backend API: `5000`
+
+## Flujos
+
+### Catálogo público
+
+1. El navegador consulta `/api/catalog/*`.
+2. Las rutas BFF del frontend llaman a `INTERNAL_API_BASE_URL` con `INTERNAL_API_KEY` desde servidor.
+3. La UI recibe payload sanitizado y mensajes amigables.
+
+### Admin API Console
+
+- Ruta: `/admin/api-console`
+- Requiere Basic Auth (`ADMIN_CONSOLE_USERNAME` + `ADMIN_CONSOLE_PASSWORD`).
+- Permite probar presets de `search/cards/prints` contra el BFF interno.
+- No aparece en la navegación pública del catálogo.
+
 
 ### Puertos de desarrollo
 
