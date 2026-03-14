@@ -1,10 +1,13 @@
 {
   "sets": [
-    {"id": "rb-set-1", "code": "RB1", "name": "Foundations"}
+    {"id": "rb-set-1", "code": "RB1", "name": "Foundations"},
+    {"id": "rb-set-2", "code": "RB2", "name": "Fractured Realms"}
   ],
   "cards": [
     {"id": "rb-card-1", "name": "Skywarden Adept"},
-    {"id": "rb-card-2", "name": "Shardbreaker Titan"}
+    {"id": "rb-card-2", "name": "Shardbreaker Titan"},
+    {"id": "rb-card-3", "name": "Glimmercoil Scout"},
+    {"id": "rb-card-4", "name": "Aetherpulse Nova"}
   ],
   "prints": [
     {
@@ -13,6 +16,8 @@
       "set_code": "RB1",
       "card_id": "rb-card-1",
       "collector_number": "001",
+      "rarity": "common",
+      "language": "en",
       "primary_image_url": "https://example.com/riftbound/rb1/001.png"
     },
     {
@@ -21,7 +26,39 @@
       "set_code": "RB1",
       "card_id": "rb-card-2",
       "collector_number": "002",
+      "rarity": "rare",
+      "language": "en",
       "primary_image_url": "https://example.com/riftbound/rb1/002.png"
+    },
+    {
+      "id": "rb-print-3",
+      "set_id": "rb-set-1",
+      "set_code": "RB1",
+      "card_id": "rb-card-3",
+      "collector_number": "045",
+      "rarity": "uncommon",
+      "language": "en",
+      "primary_image_url": "https://example.com/riftbound/rb1/045.png"
+    },
+    {
+      "id": "rb-print-4",
+      "set_id": "rb-set-2",
+      "set_code": "RB2",
+      "card_id": "rb-card-2",
+      "collector_number": "008",
+      "rarity": "mythic",
+      "language": "en",
+      "primary_image_url": "https://example.com/riftbound/rb2/008.png"
+    },
+    {
+      "id": "rb-print-5",
+      "set_id": "rb-set-2",
+      "set_code": "RB2",
+      "card_id": "rb-card-4",
+      "collector_number": "015",
+      "rarity": "rare",
+      "language": "es",
+      "primary_image_url": "https://example.com/riftbound/rb2/015.png"
     }
   ]
 }

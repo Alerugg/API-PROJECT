@@ -43,6 +43,7 @@ test('catalog client consumes internal BFF routes', async () => {
   assert.match(apiClient, /\/api\/catalog\/cards\//)
   assert.match(apiClient, /\/api\/catalog\/prints\//)
   assert.doesNotMatch(apiClient, /NEXT_PUBLIC_API_KEY/)
+  assert.match(apiClient, /\{ value: 'riftbound', label: 'Riftbound' \}/)
 })
 
 test('BFF helper reads internal server-side env vars', async () => {
