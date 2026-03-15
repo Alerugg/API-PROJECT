@@ -49,11 +49,12 @@ Todos los conectores del catálogo (Pokémon, MTG, Yu-Gi-Oh!, Riftbound) siguen 
 
 ### riftbound
 - Modo configurable por `RIFTBOUND_SOURCE=official|fallback|auto`.
-- `auto` prioriza backend oficial (Riot Content API) cuando hay `RIFTBOUND_API_BASE_URL` + `RIFTBOUND_API_KEY`; si faltan, usa fallback.
+- `auto` prioriza backend oficial (Riot `riftbound-content-v1`) cuando hay `RIFTBOUND_API_BASE_URL` + `RIFTBOUND_API_KEY`; si faltan, usa fallback.
 - Backend fallback soporta fixture local (`riftbound_sample.json`) y remoto opcional (`RIFTBOUND_FALLBACK_BASE_URL`).
+- El backend oficial consume `GET /riftbound/content/v1/contents` (catálogo unificado por set con cards anidadas), autentica con `X-Riot-Token`, y transforma a `{set, card, print}` sin asumir endpoints `/sets|/cards|/prints`.
 - Ambos backends mapean al mismo esquema lógico y comparten normalización `{set, card, print}`.
 - Dedupe por checksum + `riftbound_id` y fallback funcional `(set_id, card_id, collector_number, language, variant)`.
-- Guarda `PrintIdentifier(source=riftbound)` e imagen primaria con placeholder controlado si la URL externa no es confiable.
+- Guarda `PrintIdentifier(source=riftbound)`; usa imagen oficial (`art.fullURL` / `art.thumbnailURL`) cuando existe y cae a placeholder local solo cuando no hay asset usable.
 
 ## Dataset mínimo útil recomendado (QA frontend)
 - Yu-Gi-Oh!: `limit >= 120`.

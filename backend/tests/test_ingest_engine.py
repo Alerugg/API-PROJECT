@@ -1983,7 +1983,54 @@ def test_riftbound_selects_official_backend_in_auto_with_credentials(client, mon
     payloads = connector.load(fixture=False, limit=1)
 
     assert calls == ["official"]
-    assert payloads[0][1]["print"]["source_system"] == "riot_content_api"
+    assert payloads[0][1]["print"]["source_system"] == "riot_riftbound_content_v1"
+
+
+def test_riftbound_official_mode_requires_configuration(client, monkeypatch):
+    connector = get_connector("riftbound")
+    monkeypatch.setenv("RIFTBOUND_SOURCE", "official")
+    monkeypatch.delenv("RIFTBOUND_API_BASE_URL", raising=False)
+    monkeypatch.delenv("RIFTBOUND_API_KEY", raising=False)
+
+    try:
+        connector.load(fixture=False)
+        assert False, "expected RuntimeError when official mode is missing credentials"
+    except RuntimeError as exc:
+        assert "missing official configuration" in str(exc)
+
+
+def test_riftbound_official_backend_uses_x_riot_token_header_and_content_endpoint(client, monkeypatch):
+    from app.ingest.connectors.riftbound_official import RiftboundOfficialBackend
+
+    monkeypatch.setenv("RIFTBOUND_API_BASE_URL", "https://americas.api.riotgames.com")
+    monkeypatch.setenv("RIFTBOUND_API_KEY", "test-token")
+
+    calls: list[dict] = []
+
+    class _FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status() -> None:
+            return None
+
+        @staticmethod
+        def json() -> dict:
+            return {"sets": []}
+
+    def _fake_get(url, timeout=None, params=None):
+        calls.append({"url": url, "timeout": timeout, "params": params})
+        return _FakeResponse()
+
+    backend = RiftboundOfficialBackend(get_connector("riftbound").logger)
+    monkeypatch.setattr(backend.session, "get", _fake_get)
+
+    backend.fetch_all(locale="en")
+
+    assert calls[0]["url"] == "https://americas.api.riotgames.com/riftbound/content/v1/contents"
+    assert calls[0]["params"] == {"locale": "en"}
+    assert backend.session.headers.get("X-Riot-Token") == "test-token"
+    assert "Authorization" not in backend.session.headers
 
 
 def test_riftbound_normalization_is_homogeneous_between_official_and_fallback(client):
@@ -1992,16 +2039,28 @@ def test_riftbound_normalization_is_homogeneous_between_official_and_fallback(cl
 
     official_payload = json.loads(Path("data/fixtures/riftbound_official_like.json").read_text(encoding="utf-8"))
     from app.ingest.connectors.riftbound_official import RiftboundOfficialBackend
-    from app.ingest.connectors.riftbound_types import RiftboundBatch
-
     backend = RiftboundOfficialBackend(connector.logger)
-    records = backend.to_logical_records(RiftboundBatch(**official_payload))
+    records = backend.to_logical_records(backend.fetch_all_from_content(official_payload))
     official_rows = [connector.normalize(connector._logical_to_payload(item)) for item in records]
     fallback_rows = [connector.normalize(payload) for _, payload, _ in fallback_payloads[:2]]
 
     assert [row["set"]["code"] for row in official_rows] == [row["set"]["code"] for row in fallback_rows]
     assert [row["card"]["name"] for row in official_rows] == [row["card"]["name"] for row in fallback_rows]
     assert [row["print"]["collector_number"] for row in official_rows] == [row["print"]["collector_number"] for row in fallback_rows]
+
+
+def test_riftbound_official_payload_parsing_and_image_fallback(client):
+    connector = get_connector("riftbound")
+    official_payload = json.loads(Path("data/fixtures/riftbound_official_like.json").read_text(encoding="utf-8"))
+    from app.ingest.connectors.riftbound_official import RiftboundOfficialBackend
+
+    backend = RiftboundOfficialBackend(connector.logger)
+    batch = backend.fetch_all_from_content(official_payload)
+    records = backend.to_logical_records(batch)
+    normalized_rows = [connector.normalize(connector._logical_to_payload(item)) for item in records]
+
+    assert normalized_rows[0]["print"]["primary_image_url"] == "https://cdn.riot.example/rb1/001-full.webp"
+    assert normalized_rows[1]["print"]["primary_image_url"].startswith("/images/riftbound/")
 
 
 

@@ -1,32 +1,58 @@
 {
+  "game": "riftbound",
+  "version": "1.0.0",
+  "lastUpdated": "2026-03-01T12:00:00Z",
+  "locale": "en",
   "sets": [
-    {"id": "official-set-rb1", "code": "RB1", "name": "Foundations"},
-    {"id": "official-set-ogn", "code": "OGN", "name": "Omen Genesis Nights"}
-  ],
-  "cards": [
-    {"id": "official-card-1", "name": "Kai'Sa, Void Skirmisher"},
-    {"id": "official-card-2", "name": "Ogn, Relic Warden"}
-  ],
-  "prints": [
     {
-      "id": "official-print-1",
-      "set_id": "official-set-rb1",
-      "card_id": "official-card-1",
-      "collector_number": "001",
-      "rarity": "mythic",
-      "language": "en",
-      "variant": "default",
-      "images": {"large": "https://cdn.riot.example/rb1/001-large.webp", "small": "https://cdn.riot.example/rb1/001-small.webp"}
+      "id": "set-rb1",
+      "name": "Foundations",
+      "cards": [
+        {
+          "id": "card-rb1-001",
+          "collectorNumber": 1,
+          "set": "set-rb1",
+          "name": "Kai'Sa, Void Skirmisher",
+          "description": "Champion card",
+          "type": "Unit",
+          "rarity": "mythic",
+          "faction": "Void",
+          "stats": {"energy": 4, "might": 3, "cost": 5, "power": 4},
+          "keywords": ["Quick Attack"],
+          "art": {
+            "thumbnailURL": "https://cdn.riot.example/rb1/001-thumb.webp",
+            "fullURL": "https://cdn.riot.example/rb1/001-full.webp",
+            "artist": "Riot Art Team"
+          },
+          "flavorText": "Void in motion.",
+          "tags": ["default"]
+        }
+      ]
     },
     {
-      "id": "official-print-2",
-      "set_id": "official-set-ogn",
-      "card_id": "official-card-2",
-      "collector_number": "003",
-      "rarity": "rare",
-      "language": "en",
-      "variant": "showcase",
-      "images": [{"url": "https://cdn.riot.example/ogn/003.webp"}]
+      "id": "set-ogn",
+      "name": "Omen Genesis Nights",
+      "cards": [
+        {
+          "id": "card-ogn-003",
+          "collectorNumber": 3,
+          "set": "set-ogn",
+          "name": "Ogn, Relic Warden",
+          "description": "Legendary relic bearer",
+          "type": "Unit",
+          "rarity": "rare",
+          "faction": "Relic",
+          "stats": {"energy": 3, "might": 4, "cost": 4, "power": 4},
+          "keywords": ["Ward"],
+          "art": {
+            "thumbnailURL": "",
+            "fullURL": "",
+            "artist": "Riot Art Team"
+          },
+          "flavorText": "Keeper of ancient vaults.",
+          "tags": ["showcase"]
+        }
+      ]
     }
   ]
 }
