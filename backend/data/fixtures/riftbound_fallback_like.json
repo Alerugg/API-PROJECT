@@ -1,0 +1,34 @@
+{
+  "sets": [
+    {"id": "fallback-set-rb1", "code": "RB1", "name": "Foundations"},
+    {"id": "fallback-set-ogn", "code": "OGN", "name": "Omen Genesis Nights"}
+  ],
+  "cards": [
+    {"id": "fallback-card-1", "name": "Kai'Sa, Void Skirmisher"},
+    {"id": "fallback-card-2", "name": "Ogn, Relic Warden"}
+  ],
+  "prints": [
+    {
+      "id": "fallback-print-1",
+      "set_id": "fallback-set-rb1",
+      "set_code": "RB1",
+      "card_id": "fallback-card-1",
+      "collector_number": "001",
+      "rarity": "mythic",
+      "language": "en",
+      "variant": "default",
+      "primary_image_url": "https://cdn.riftcodex.example/rb1/001.webp"
+    },
+    {
+      "id": "fallback-print-2",
+      "set_id": "fallback-set-ogn",
+      "set_code": "OGN",
+      "card_id": "fallback-card-2",
+      "collector_number": "003",
+      "rarity": "rare",
+      "language": "en",
+      "variant": "showcase",
+      "primary_image_url": "https://cdn.riftcodex.example/ogn/003.webp"
+    }
+  ]
+}

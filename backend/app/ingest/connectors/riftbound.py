@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-import json
-import time
+import os
 from pathlib import Path
 
-import requests
 from sqlalchemy import select
 
 from app.ingest.base import IngestStats, SourceConnector
+from app.ingest.connectors.riftbound_fallback import RiftboundFallbackBackend
+from app.ingest.connectors.riftbound_official import RiftboundOfficialBackend
+from app.ingest.connectors.riftbound_types import RiftboundBackend, RiftboundLogicalRecord
 from app.ingest.normalization import normalize_variant
 from app.models import Card, Game, Print, PrintIdentifier, PrintImage, Set
 
 
 class RiftboundConnector(SourceConnector):
     name = "riftbound"
-    mode = "fixture_only"
+    mode = "configurable"
     _RIFTBOUND_IMAGE_DOMAIN = "images.riftbound.cards"
     _SET_PLACEHOLDERS: dict[str, str] = {
         "rb1": "/images/riftbound/rb1-placeholder.svg",
@@ -50,104 +51,88 @@ class RiftboundConnector(SourceConnector):
             return image_url
         return cls._placeholder_for_set_code(set_code)
 
+    def _source_mode(self) -> str:
+        mode = str(os.getenv("RIFTBOUND_SOURCE") or "auto").strip().lower()
+        if mode not in {"official", "fallback", "auto"}:
+            self.logger.warning("ingest riftbound invalid_source_mode=%s using=auto", mode)
+            return "auto"
+        return mode
+
+    def _build_backends(self) -> tuple[RiftboundOfficialBackend, RiftboundFallbackBackend]:
+        return RiftboundOfficialBackend(self.logger), RiftboundFallbackBackend(self.logger)
+
+    def _select_backend(self, *, fixture: bool = False) -> RiftboundBackend:
+        official_backend, fallback_backend = self._build_backends()
+        mode = self._source_mode()
+
+        if fixture:
+            self.logger.info("ingest riftbound backend_selected=%s reason=fixture_mode", fallback_backend.source_name)
+            return fallback_backend
+
+        if mode == "official":
+            if not official_backend.is_configured():
+                raise RuntimeError("RIFTBOUND_SOURCE=official but missing official configuration")
+            self.logger.info("ingest riftbound backend_selected=official reason=env_explicit")
+            return official_backend
+
+        if mode == "fallback":
+            self.logger.info("ingest riftbound backend_selected=fallback reason=env_explicit")
+            return fallback_backend
+
+        if official_backend.is_configured():
+            self.logger.info("ingest riftbound backend_selected=official reason=auto_detected_credentials")
+            return official_backend
+
+        self.logger.info("ingest riftbound backend_selected=fallback reason=auto_missing_credentials")
+        return fallback_backend
+
+    @staticmethod
+    def _logical_to_payload(record: RiftboundLogicalRecord) -> dict:
+        set_code = record.set_code.strip().lower()
+        return {
+            "set": {
+                "code": set_code,
+                "name": record.set_name,
+                "riftbound_id": record.metadata.get("set_external_id"),
+            },
+            "card": {
+                "name": record.card_name,
+                "riftbound_id": record.card_external_id,
+            },
+            "print": {
+                "collector_number": record.collector_number,
+                "set_code": set_code,
+                "riftbound_id": record.print_external_id,
+                "language": record.locale,
+                "rarity": record.rarity,
+                "variant": record.variant,
+                "primary_image_url": record.image_url or record.thumbnail_url,
+                "source_system": record.source_system,
+                "raw_json": record.metadata,
+            },
+            "game_slug": record.game_slug,
+        }
+
     def load(self, path: str | Path | None = None, **kwargs) -> list[tuple[Path, dict, str]]:
         fixture = bool(kwargs.get("fixture", False))
         limit = kwargs.get("limit")
-
-        self.logger.info("ingest riftbound load_start fixture=%s limit=%s", fixture, limit)
-        records = self._load_fixture(path, limit=limit) if fixture else self._load_remote(limit=limit)
+        backend = self._select_backend(fixture=fixture)
+        batch = backend.fetch_all(path=path, fixture=fixture, limit=limit)
+        logical_records = backend.to_logical_records(batch, path=path, fixture=fixture, limit=limit)
 
         payloads: list[tuple[Path, dict, str]] = []
-        for idx, record in enumerate(records):
-            payloads.append((Path(f"riftbound_print_{idx+1}.json"), record, self.checksum(record)))
+        for idx, record in enumerate(logical_records):
+            payload = self._logical_to_payload(record)
+            payloads.append((Path(f"riftbound_print_{idx+1}.json"), payload, self.checksum(payload)))
 
-        self.logger.info("ingest riftbound load_done fixture=%s records=%s limit=%s", fixture, len(payloads), limit)
-        return payloads
-
-    def _resolve_fixture_path(self, path: str | Path | None) -> Path:
-        fixture_name = "riftbound_sample.json"
-        root = Path(__file__).resolve().parents[3]
-        candidate = Path(path) if path else root / "data" / "fixtures" / fixture_name
-        if candidate.is_file():
-            return candidate
-        for option in (root / str(candidate), root.parent / str(candidate), root / "data" / "fixtures" / fixture_name):
-            if option.is_file():
-                return option
-            if option.is_dir() and (option / fixture_name).is_file():
-                return option / fixture_name
-        raise ValueError(f"Unable to resolve Riftbound fixture path: {path}")
-
-    def _load_fixture(self, path: str | Path | None, limit: int | None) -> list[dict]:
-        fixture_path = self._resolve_fixture_path(path)
-        payload = json.loads(fixture_path.read_text(encoding="utf-8"))
-
-        sets = {str(item.get("id") or item.get("code")): item for item in payload.get("sets") or []}
-        cards = {str(item.get("id") or item.get("name")): item for item in payload.get("cards") or []}
-
-        out: list[dict] = []
-        seen_print_ids: set[str] = set()
-        for idx, print_item in enumerate(payload.get("prints") or []):
-            dedupe_id = str(print_item.get("id") or "").strip()
-            if dedupe_id and dedupe_id in seen_print_ids:
-                continue
-            if dedupe_id:
-                seen_print_ids.add(dedupe_id)
-
-            record = {
-                "set": sets.get(str(print_item.get("set_id"))) or sets.get(str(print_item.get("set_code"))) or {},
-                "card": cards.get(str(print_item.get("card_id"))) or cards.get(str(print_item.get("card_name"))) or {},
-                "print": print_item,
-            }
-            out.append(record)
-            if limit and len(out) >= limit:
-                break
-            if len(out) == 1 or len(out) % 25 == 0:
-                self.logger.info("ingest riftbound load_progress fixture=true processed=%s", len(out))
-        return out
-
-    def _load_remote(self, limit: int | None = None) -> list[dict]:
-        raise RuntimeError(
-            "Riftbound connector is fixture-only until a stable public catalog source is available. "
-            "Run with --fixture true and provide a local fixture path."
+        self.logger.info(
+            "ingest riftbound load_done backend=%s fixture=%s records=%s limit=%s",
+            backend.source_name,
+            fixture,
+            len(payloads),
+            limit,
         )
-
-    def _request_json(self, url: str, params: dict | None = None) -> dict:
-        wait_seconds = 0.5
-        last_error: Exception | None = None
-        for attempt in range(1, 6):
-            started = time.perf_counter()
-            try:
-                response = requests.get(url, params=params, timeout=30)
-                elapsed_ms = round((time.perf_counter() - started) * 1000)
-                if response.status_code in (429, 500, 502, 503, 504):
-                    self.logger.warning(
-                        "ingest riftbound request_retry url=%s status=%s attempt=%s elapsed_ms=%s wait_seconds=%s",
-                        url,
-                        response.status_code,
-                        attempt,
-                        elapsed_ms,
-                        wait_seconds,
-                    )
-                    time.sleep(wait_seconds)
-                    wait_seconds *= 2
-                    continue
-                response.raise_for_status()
-                self.logger.info(
-                    "ingest riftbound request_done url=%s status=%s attempt=%s elapsed_ms=%s",
-                    url,
-                    response.status_code,
-                    attempt,
-                    elapsed_ms,
-                )
-                return response.json()
-            except requests.RequestException as exc:
-                last_error = exc
-                if attempt >= 5:
-                    break
-                time.sleep(wait_seconds)
-                wait_seconds *= 2
-
-        raise RuntimeError(f"Riftbound request failed after retries: {url} last_error={last_error}")
+        return payloads
 
     def normalize(self, payload: dict, **kwargs) -> dict:
         set_payload = payload.get("set") or {}
@@ -157,19 +142,19 @@ class RiftboundConnector(SourceConnector):
             "set": {
                 "code": (set_payload.get("code") or print_payload.get("set_code") or "").strip().lower(),
                 "name": (set_payload.get("name") or print_payload.get("set_name") or "").strip(),
-                "riftbound_id": str(set_payload.get("id")) if set_payload.get("id") is not None else None,
+                "riftbound_id": str(set_payload.get("riftbound_id")) if set_payload.get("riftbound_id") is not None else None,
             },
             "card": {
                 "name": (card_payload.get("name") or print_payload.get("card_name") or "").strip(),
-                "riftbound_id": str(card_payload.get("id")) if card_payload.get("id") is not None else None,
+                "riftbound_id": str(card_payload.get("riftbound_id")) if card_payload.get("riftbound_id") is not None else None,
             },
             "print": {
                 "collector_number": str(print_payload.get("collector_number") or "").strip(),
                 "set_code": (print_payload.get("set_code") or "").strip().lower(),
-                "riftbound_id": str(print_payload.get("id")) if print_payload.get("id") is not None else None,
+                "riftbound_id": str(print_payload.get("riftbound_id")) if print_payload.get("riftbound_id") is not None else None,
                 "language": self._normalize_language(print_payload.get("language") or card_payload.get("language")),
                 "rarity": self._normalize_rarity(print_payload.get("rarity")),
-                "raw_json": print_payload,
+                "raw_json": print_payload.get("raw_json") or print_payload,
                 "variant": normalize_variant(print_payload.get("variant")),
                 "primary_image_url": self._resolve_primary_image_url(
                     print_payload.get("primary_image_url"),
@@ -303,12 +288,13 @@ class RiftboundConnector(SourceConnector):
         primary_image = session.execute(
             select(PrintImage).where(PrintImage.print_id == print_row.id, PrintImage.is_primary.is_(True))
         ).scalar_one_or_none()
+        image_source = str(print_payload.get("source_system") or "riftbound")
         if primary_image is None:
-            session.add(PrintImage(print_id=print_row.id, url=image_url, is_primary=True, source="riftbound"))
+            session.add(PrintImage(print_id=print_row.id, url=image_url, is_primary=True, source=image_source))
             stats.records_inserted += 1
-        elif primary_image.url != image_url or primary_image.source != "riftbound":
+        elif primary_image.url != image_url or primary_image.source != image_source:
             primary_image.url = image_url
-            primary_image.source = "riftbound"
+            primary_image.source = image_source
             stats.records_updated += 1
 
         return {"set_id": set_row.id, "card_id": card_row.id, "print_id": print_row.id}

@@ -1829,6 +1829,30 @@ def test_search_response_does_not_expose_internal_score(client):
     assert payload
     assert all("score" not in item for item in payload)
 
+
+
+def test_search_suggest_riftbound_supports_expected_queries(client):
+    connector = get_connector("riftbound")
+    with db.SessionLocal() as session:
+        connector.run(session, "data/fixtures/riftbound_sample.json", fixture=True, incremental=False)
+        session.commit()
+
+    queries = {
+        "kai": "Kai'Sa, Void Skirmisher",
+        "kai'sa": "Kai'Sa, Void Skirmisher",
+        "kaisa": "Kai'Sa, Void Skirmisher",
+        "ogn": "Ogn, Relic Warden",
+        "foundations": "Foundations",
+    }
+
+    for query, expected_title in queries.items():
+        response = client.get("/api/v1/search/suggest", query_string={"q": query, "game": "riftbound"}, headers=_auth_headers())
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload, query
+        assert any(expected_title in str(item.get("title") or "") for item in payload)
+        assert all(item.get("game") == "riftbound" for item in payload)
+
 def test_search_short_query_mode_uses_tighter_default_limit(client):
     _seed_yugioh_search_fixture()
 
@@ -1904,7 +1928,7 @@ def test_search_short_mtg_fo_for_still_prioritizes_forest(client):
         response = client.get(f"/api/v1/search?q={query}&game=mtg", headers=_auth_headers())
         assert response.status_code == 200
         payload = response.get_json()
-        assert payload
+        assert payload, query
         assert (payload[0].get("title") or "").lower().startswith("for")
 
 

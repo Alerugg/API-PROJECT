@@ -1923,17 +1923,113 @@ def test_yugioh_incremental_remote_mode_limit_terminates_and_persists_rows(clien
     assert prints > 0
     assert primary_images > 0
 
-def test_riftbound_remote_load_requires_fixture_mode():
+def test_riftbound_selects_fallback_backend_when_requested(client, monkeypatch):
+    connector = get_connector("riftbound")
+    monkeypatch.setenv("RIFTBOUND_SOURCE", "fallback")
+
+    payloads = connector.load("data/fixtures/riftbound_sample.json", fixture=True, limit=1)
+
+    assert payloads
+    _, payload, _ = payloads[0]
+    assert payload["print"]["source_system"] == "riftcodex"
+
+
+def test_riftbound_selects_official_backend_in_auto_with_credentials(client, monkeypatch):
+    connector = get_connector("riftbound")
+    monkeypatch.setenv("RIFTBOUND_SOURCE", "auto")
+    monkeypatch.setenv("RIFTBOUND_API_BASE_URL", "https://riot.example/content")
+    monkeypatch.setenv("RIFTBOUND_API_KEY", "token")
+
+    calls: list[str] = []
+
+    class _FakeOfficialBackend:
+        source_name = "official"
+
+        @staticmethod
+        def is_configured() -> bool:
+            return True
+
+        def fetch_all(self, **kwargs):
+            calls.append("official")
+            from app.ingest.connectors.riftbound_types import RiftboundBatch
+
+            return RiftboundBatch(
+                sets=[{"id": "s1", "code": "RB1", "name": "Foundations"}],
+                cards=[{"id": "c1", "name": "Kai'Sa, Void Skirmisher"}],
+                prints=[
+                    {
+                        "id": "p1",
+                        "set_id": "s1",
+                        "card_id": "c1",
+                        "collector_number": "001",
+                        "rarity": "mythic",
+                        "language": "en",
+                        "variant": "default",
+                        "images": {"large": "https://cdn.riot.example/p1.webp"},
+                    }
+                ],
+            )
+
+        def to_logical_records(self, batch, **kwargs):
+            from app.ingest.connectors.riftbound_official import RiftboundOfficialBackend
+
+            return RiftboundOfficialBackend(connector.logger).to_logical_records(batch)
+
+    class _FakeFallbackBackend:
+        source_name = "fallback"
+
+    monkeypatch.setattr(connector, "_build_backends", lambda: (_FakeOfficialBackend(), _FakeFallbackBackend()))
+
+    payloads = connector.load(fixture=False, limit=1)
+
+    assert calls == ["official"]
+    assert payloads[0][1]["print"]["source_system"] == "riot_content_api"
+
+
+def test_riftbound_normalization_is_homogeneous_between_official_and_fallback(client):
+    connector = get_connector("riftbound")
+    fallback_payloads = connector.load("data/fixtures/riftbound_fallback_like.json", fixture=True)
+
+    official_payload = json.loads(Path("data/fixtures/riftbound_official_like.json").read_text(encoding="utf-8"))
+    from app.ingest.connectors.riftbound_official import RiftboundOfficialBackend
+    from app.ingest.connectors.riftbound_types import RiftboundBatch
+
+    backend = RiftboundOfficialBackend(connector.logger)
+    records = backend.to_logical_records(RiftboundBatch(**official_payload))
+    official_rows = [connector.normalize(connector._logical_to_payload(item)) for item in records]
+    fallback_rows = [connector.normalize(payload) for _, payload, _ in fallback_payloads[:2]]
+
+    assert [row["set"]["code"] for row in official_rows] == [row["set"]["code"] for row in fallback_rows]
+    assert [row["card"]["name"] for row in official_rows] == [row["card"]["name"] for row in fallback_rows]
+    assert [row["print"]["collector_number"] for row in official_rows] == [row["print"]["collector_number"] for row in fallback_rows]
+
+
+
+def test_riftbound_fixture_incremental_idempotent_second_run_skips_existing(client):
     connector = get_connector("riftbound")
 
-    try:
-        connector.load(fixture=False, limit=1)
-        assert False, "expected RuntimeError"
-    except RuntimeError as exc:
-        message = str(exc).lower()
-        assert "fixture-only" in message
-        assert "--fixture true" in message
+    with db.SessionLocal() as session:
+        first = connector.run(
+            session,
+            "data/fixtures/riftbound_sample.json",
+            fixture=True,
+            incremental=True,
+        )
+        session.commit()
 
+    with db.SessionLocal() as session:
+        second = connector.run(
+            session,
+            "data/fixtures/riftbound_sample.json",
+            fixture=True,
+            incremental=True,
+        )
+        session.commit()
+
+    assert first.records_inserted > 0
+    assert second.records_inserted == 0
+    assert second.records_updated == 0
+    assert second.files_skipped > 0
 
 def test_scryfall_upsert_returns_touched_entity_ids(client):
     connector = get_connector("scryfall_mtg")
