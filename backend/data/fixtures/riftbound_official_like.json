@@ -1,0 +1,32 @@
+{
+  "sets": [
+    {"id": "official-set-rb1", "code": "RB1", "name": "Foundations"},
+    {"id": "official-set-ogn", "code": "OGN", "name": "Omen Genesis Nights"}
+  ],
+  "cards": [
+    {"id": "official-card-1", "name": "Kai'Sa, Void Skirmisher"},
+    {"id": "official-card-2", "name": "Ogn, Relic Warden"}
+  ],
+  "prints": [
+    {
+      "id": "official-print-1",
+      "set_id": "official-set-rb1",
+      "card_id": "official-card-1",
+      "collector_number": "001",
+      "rarity": "mythic",
+      "language": "en",
+      "variant": "default",
+      "images": {"large": "https://cdn.riot.example/rb1/001-large.webp", "small": "https://cdn.riot.example/rb1/001-small.webp"}
+    },
+    {
+      "id": "official-print-2",
+      "set_id": "official-set-ogn",
+      "card_id": "official-card-2",
+      "collector_number": "003",
+      "rarity": "rare",
+      "language": "en",
+      "variant": "showcase",
+      "images": [{"url": "https://cdn.riot.example/ogn/003.webp"}]
+    }
+  ]
+}

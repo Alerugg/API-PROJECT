@@ -405,6 +405,7 @@ def _fallback_suggest_rows(session, *, q: str, game: str, limit: int):
         "prefix": f"{term}%",
         "contains": f"{term}%" if short_query else f"%{term}%",
         "token_prefix": f"% {term}%",
+        "compact_contains": f"%{re.sub(r'[^a-z0-9]', '', term)}%",
         "is_code_like_query": is_code_like_query,
         "is_exact_code_query": is_exact_code_query,
         "is_text_query": is_text_query,
@@ -447,6 +448,7 @@ def _fallback_suggest_rows(session, *, q: str, game: str, limit: int):
               CASE WHEN :is_text_query = 1 AND lower(sd.title) LIKE :prefix THEN 1700.0 ELSE 0.0 END +
               CASE WHEN :is_text_query = 1 AND (' ' || lower(sd.title)) LIKE :token_prefix THEN 820.0 ELSE 0.0 END +
               CASE WHEN :is_text_query = 1 AND lower(sd.title) LIKE :contains THEN 420.0 ELSE 0.0 END +
+              CASE WHEN :is_text_query = 1 AND replace(replace(replace(lower(sd.title), '''', ''), '-', ''), ' ', '') LIKE :compact_contains THEN 420.0 ELSE 0.0 END +
               CASE WHEN :is_exact_code_query = 1 AND sd.doc_type = 'print' AND lower(COALESCE(p.collector_number, '')) = :q THEN 4200.0 ELSE 0.0 END +
               CASE WHEN :is_exact_code_query = 1 AND sd.doc_type = 'set' AND lower(COALESCE(s.code, '')) = :q THEN 3200.0 ELSE 0.0 END +
               CASE WHEN :is_exact_code_query = 1 AND sd.doc_type = 'print' AND lower(COALESCE(s.code, '')) = :code_prefix THEN 700.0 ELSE 0.0 END +
@@ -500,6 +502,7 @@ def _fallback_suggest_rows(session, *, q: str, game: str, limit: int):
           )
           WHERE (
             lower(sd.title) LIKE :contains
+            OR replace(replace(replace(lower(sd.title), '''', ''), '-', ''), ' ', '') LIKE :compact_contains
             OR lower(COALESCE(p.collector_number, '')) LIKE :contains
             OR lower(COALESCE(s.code, '')) LIKE :contains
           )
